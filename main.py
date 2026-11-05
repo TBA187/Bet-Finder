@@ -16,7 +16,7 @@ odds_service = OddsService()
 
 @app.get("/")
 async def read_root(request: Request):
-    return templates.TemplateResponse("index.html", {"request": request})
+    return templates.TemplateResponse(request=request, name="index.html")
 
 @app.get("/api/errors")
 async def get_errors(sport: str = None, min_dev: float = 0.0):
