@@ -1,152 +1,41 @@
 <!DOCTYPE html>
-<html lang="da">
+<html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>BetFinder 1.0 Ultimate Pro</title>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/static/css/style.css">
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0f1218">
+  <meta name="description" content="BetFinder - European bookmaker odds scanner and value-bet analysis">
+  <title>BetFinder</title>
+  <link rel="icon" href="/static/icon.svg" type="image/svg+xml">
+  <link rel="manifest" href="/static/manifest.json">
+  <link rel="stylesheet" href="/static/css/style.css?v={{ version }}">
 </head>
 <body>
-
-    <header>
-        <div class="logo">
-            <h1>BetFinder <span>1.0 Pro</span></h1>
-        </div>
-        <div class="status-badge" id="dataSourceStatus">Pinnacle Benchmark + Kelly Engine</div>
-    </header>
-
-    <div class="container">
-        <!-- Navigation Tabs -->
-        <div class="nav-tabs">
-            <button class="tab-btn active" onclick="switchTab('errorFinder')">Fejlfinder</button>
-            <button class="tab-btn" onclick="switchTab('dailyPicks')">Daily Picks</button>
-            <button class="tab-btn" onclick="switchTab('clvTracker')">CLV Tracker</button>
-            <button class="tab-btn" onclick="switchTab('addMatch')">+ Tilføj</button>
-        </div>
-
-        <!-- TAB 1: ERROR FINDER -->
-        <div id="errorFinder" class="tab-content active">
-            <!-- Filter Bar -->
-            <div class="filter-bar">
-                <div>
-                    <label style="font-size: 0.75rem; color: var(--text-secondary);">Sport:</label>
-                    <select id="sportFilter" class="form-control-sm" onchange="loadErrors()">
-                        <option value="Alle">Alle Sport</option>
-                        <option value="Fodbold">Fodbold</option>
-                        <option value="Basketball">Basketball</option>
-                    </select>
-                </div>
-                <div>
-                    <label style="font-size: 0.75rem; color: var(--text-secondary);">Min. Afvigelse (%):</label>
-                    <select id="devFilter" class="form-control-sm" onchange="loadErrors()">
-                        <option value="0">Alle (0%+)</option>
-                        <option value="5">Warning (5%+)</option>
-                        <option value="10">Alert (10%+)</option>
-                    </select>
-                </div>
-            </div>
-
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
-                <h3 style="font-size: 1rem;">Pinnacle True Odds vs. Udbydere</h3>
-                <span style="font-size: 0.8rem; color: var(--text-secondary);" id="matchCount">Henter data...</span>
-            </div>
-            
-            <div id="errorListContainer"></div>
-        </div>
-
-        <!-- TAB 2: DAILY PICKS -->
-        <div id="dailyPicks" class="tab-content">
-            <h3 style="font-size: 1rem; margin-bottom: 12px;">Dynamiske Kuponforslag (Maks 2 stk)</h3>
-            <div id="dailyPicksContainer"></div>
-        </div>
-
-        <!-- TAB 3: CLV TRACKER -->
-        <div id="clvTracker" class="tab-content">
-            <h3 style="font-size: 1rem; margin-bottom: 12px;">Closing Line Value (CLV) Historik & Performance</h3>
-            <div id="clvContainer"></div>
-        </div>
-
-        <!-- TAB 4: TILFØJ MANUELT ODDS -->
-        <div id="addMatch" class="tab-content">
-            <div class="card">
-                <h3 style="font-size: 1rem; margin-bottom: 12px;">Indtast Odds & Pinnacle Benchmark</h3>
-                <div class="form-group">
-                    <label>Kamp ( f.eks. FCK - Brøndby )</label>
-                    <input type="text" id="manualMatch" class="form-control" placeholder="Hjemmehold - Udehold">
-                </div>
-                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
-                    <div class="form-group">
-                        <label>Turnering</label>
-                        <select id="manualLeague" class="form-control">
-                            <option>Dansk Superliga</option>
-                            <option>UEFA Champions League</option>
-                            <option>Spansk La Liga</option>
-                            <option>Svensk Allsvenskan</option>
-                            <option>NBA</option>
-                            <option>Dansk Basketliga</option>
-                        </select>
-                    </div>
-                    <div class="form-group">
-                        <label>Sport</label>
-                        <select id="manualSport" class="form-control">
-                            <option>Fodbold</option>
-                            <option>Basketball</option>
-                        </select>
-                    </div>
-                </div>
-
-                <label style="font-size: 0.85rem; color: var(--text-secondary); margin-top: 8px; display: block;">Udbyder Odds (f.eks. Bet365 / Unibet):</label>
-                <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px;">
-                    <input type="number" step="0.01" id="manual1" class="form-control" placeholder="1: 2.25">
-                    <input type="number" step="0.01" id="manualX" class="form-control" placeholder="X: 3.40">
-                    <input type="number" step="0.01" id="manual2" class="form-control" placeholder="2: 3.20">
-                </div>
-
-                <label style="font-size: 0.85rem; color: var(--text-secondary); margin-top: 8px; display: block;">Pinnacle True Odds Benchmark:</label>
-                <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px;">
-                    <input type="number" step="0.01" id="pin1" class="form-control" placeholder="Pin 1: 2.05">
-                    <input type="number" step="0.01" id="pinX" class="form-control" placeholder="Pin X: 3.45">
-                    <input type="number" step="0.01" id="pin2" class="form-control" placeholder="Pin 2: 3.50">
-                </div>
-
-                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 8px;">
-                    <div class="form-group">
-                        <label>xG Hjemmehold</label>
-                        <input type="number" step="0.1" id="manualXgHome" class="form-control" value="1.8">
-                    </div>
-                    <div class="form-group">
-                        <label>xG Udehold</label>
-                        <input type="number" step="0.1" id="manualXgAway" class="form-control" value="1.2">
-                    </div>
-                </div>
-
-                <div class="form-group">
-                    <label>Bookmaker med afvigelse</label>
-                    <input type="text" id="manualBookie" class="form-control" placeholder="f.eks. Bet365 / Danske Spil">
-                </div>
-                <div class="form-group">
-                    <label>Din Bankroll (kr.) for Kelly-Beregning</label>
-                    <input type="number" id="manualBankroll" class="form-control" value="1000">
-                </div>
-                <button class="btn" onclick="addNewManualMatch()">Kør Fuld Python Analyse</button>
-            </div>
-        </div>
-
-        <div class="footer-note">
-            BetFinder 1.0 Ultimate Pro • FastAPI, Pinnacle Benchmark & Quarter-Kelly Engine
-        </div>
+  <header class="topbar">
+    <a class="brand" href="#scanner" aria-label="BetFinder home">
+      <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5" fill="none" stroke="currentColor" stroke-width="2.2"/><path d="M15.5 15.5 21 21" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/><path d="M7.5 11.5l2 2 4-5" fill="none" stroke="var(--accent)" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      <span>BetFinder</span>
+    </a>
+    <div class="top-actions">
+      <button id="sourcePill" class="pill" type="button" title="Data sources">Loading…</button>
+      <button id="refreshBtn" class="icon-btn" type="button" aria-label="Refresh odds data" title="Refresh odds data">
+        <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.34-5.66M20 4v5h-5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
     </div>
+  </header>
 
-    <!-- Detaljer Modal -->
-    <div id="detailModal" class="modal" onclick="closeModal(event)">
-        <div class="modal-content" onclick="event.stopPropagation()">
-            <h3 id="modalTitle" style="margin-bottom: 8px;">Analyse Detaljer</h3>
-            <div id="modalBody" style="font-size: 0.9rem; color: var(--text-secondary); margin-bottom: 16px; line-height: 1.5;"></div>
-            <button class="btn" onclick="document.getElementById('detailModal').style.display='none'">Luk</button>
-        </div>
-    </div>
+  <div id="banner" class="banner-wrap"></div>
+  <main id="view" class="view" tabindex="-1"></main>
 
-    <script src="/static/js/app.js"></script>
+  <nav class="tabbar" aria-label="Main">
+    <a href="#scanner" data-tab="scanner"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 19V9m5 10V5m5 14v-7m5 7V8" stroke="currentColor" stroke-width="2" stroke-linecap="round" fill="none"/></svg><span>Scanner</span></a>
+    <a href="#picks" data-tab="picks"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h14v16l-3-2-2 2-2-2-2 2-2-2-3 2z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M9 9h6M9 13h4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg><span>Daily Picks</span></a>
+    <a href="#add" data-tab="add"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5" fill="none" stroke="currentColor" stroke-width="2"/><path d="M12 8v8M8 12h8" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg><span>Add odds</span></a>
+    <a href="#tracker" data-tab="tracker"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 17l5-5 4 4 7-8" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Tracker</span></a>
+    <a href="#sources" data-tab="sources"><svg viewBox="0 0 24 24" aria-hidden="true"><ellipse cx="12" cy="6" rx="7" ry="3" fill="none" stroke="currentColor" stroke-width="2"/><path d="M5 6v6c0 1.7 3.1 3 7 3s7-1.3 7-3V6M5 12v6c0 1.7 3.1 3 7 3s7-1.3 7-3v-6" fill="none" stroke="currentColor" stroke-width="2"/></svg><span>Sources</span></a>
+  </nav>
+
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <script src="/static/js/app.js?v={{ version }}"></script>
 </body>
 </html>
