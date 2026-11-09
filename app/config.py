@@ -15,7 +15,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from app.core.odds_math import DEVIG_METHODS
 from app.storage.json_store import JsonStore
 
-APP_VERSION = "1.2.0"
+APP_VERSION = "1.3.0"
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 RISK_LEVELS = ("low", "medium", "high", "very_high")
@@ -38,7 +38,7 @@ _SPEC: dict[str, tuple[Any, dict]] = {
     "currency": ("DKK", {"type": str, "choices": ("DKK", "EUR", "SEK", "NOK", "GBP", "USD")}),
     "timezone": ("Europe/Copenhagen", {"type": "tz"}),
     "day_end_hour": (6, {"type": int, "min": 0, "max": 12}),
-    "lookahead_hours": (48, {"type": int, "min": 6, "max": 168}),
+    "lookahead_hours": (72, {"type": int, "min": 6, "max": 168}),
     "devig_method": ("shin", {"type": str, "choices": DEVIG_METHODS}),
     # Value / qualification thresholds
     "min_ev_pct": (3.0, {"type": float, "min": 0.0, "max": 50.0}),
@@ -86,7 +86,7 @@ _SPEC: dict[str, tuple[Any, dict]] = {
     "scraper_mode": ("fallback", {"type": str, "choices": ("off", "fallback", "always")}),
     "scraper_kambi_operators": (["ub"], {"type": list}),
     "scraper_kambi_market": ("DK", {"type": str}),
-    "scraper_min_interval_seconds": (5, {"type": int, "min": 2, "max": 600}),
+    "scraper_min_interval_seconds": (2, {"type": int, "min": 1, "max": 600}),
     # Scheduler
     "auto_refresh_minutes": (0, {"type": int, "min": 0, "max": 1440}),
     "active_hours_start": (8, {"type": int, "min": 0, "max": 23}),
@@ -101,7 +101,6 @@ _SPEC: dict[str, tuple[Any, dict]] = {
     "notify_on_picks": (True, {"type": bool}),
     "notify_on_arbitrage": (True, {"type": bool}),
     "notify_min_ev_pct": (6.0, {"type": float, "min": 0.0, "max": 100.0}),
-    "demo_mode": (False, {"type": bool}),
     "retention_days": (21, {"type": int, "min": 2, "max": 365}),
 }
 

@@ -26,7 +26,7 @@ from app.services.registry import Registry
 from app.services.repository import Repository
 from app.services.refresh import RefreshService
 from app.services.tracker import TrackerError, TrackerService
-from app.storage.json_store import JsonStore
+from app.storage.json_store import make_store
 
 log = logging.getLogger("betfinder")
 
@@ -36,7 +36,7 @@ class Container:
 
     def __init__(self, paths: Paths):
         self.paths = paths
-        self.store = JsonStore(paths.runtime)
+        self.store = make_store(paths.runtime)
         self.repo = Repository(self.store)
         self.registry = Registry(paths.registry, self.store)
         self.settings = SettingsService(self.store)
@@ -45,11 +45,15 @@ class Container:
         self.refresh = RefreshService(self.repo, self.registry, self.settings, self.tracker)
         self.refresh.after = self._after_refresh
         self.token = os.environ.get("BETFINDER_TOKEN", "").strip()
+        try:  # BetFinder uses live data only: remove anything left from the old demo mode
+            self.repo.purge_demo()
+        except Exception:
+            log.exception("could not purge old demo data")
 
     # shared views used by several endpoints and by the scheduler -----------
     def upcoming(self, now: datetime, s: dict) -> list[Fixture]:
         horizon = now + timedelta(hours=int(s["lookahead_hours"]))
-        return sorted((fx for fx in self.repo.fixtures(include_demo=bool(s["demo_mode"]))
+        return sorted((fx for fx in self.repo.fixtures(include_demo=False)
                        if fx.status == "scheduled" and now < fx.kickoff <= horizon), key=lambda f: f.kickoff)
 
     def analyses(self, now: datetime, s: dict) -> list[dict]:
@@ -106,7 +110,8 @@ def create_app(paths: Optional[Paths] = None, *, background: bool = True) -> Fas
 
     @contextlib.asynccontextmanager
     async def lifespan(app: FastAPI):
-        task = asyncio.create_task(_auto_refresh(container)) if background else None
+        # On serverless hosts (Vercel) nothing runs between requests: use /api/cron/refresh instead.
+        task = asyncio.create_task(_auto_refresh(container)) if background and not os.environ.get("VERCEL") else None
         yield
         if task:
             task.cancel()
@@ -117,7 +122,8 @@ def create_app(paths: Optional[Paths] = None, *, background: bool = True) -> Fas
 
     @app.middleware("http")
     async def token_guard(request: Request, call_next):
-        if container.token and request.url.path.startswith("/api/") and request.url.path != "/api/health":
+        path = request.url.path
+        if container.token and path.startswith("/api/") and path != "/api/health" and not path.startswith("/api/cron/"):
             if not hmac.compare_digest(request.headers.get("x-betfinder-token", ""), container.token):
                 return JSONResponse({"detail": "Access token required"}, status_code=401)
         return await call_next(request)

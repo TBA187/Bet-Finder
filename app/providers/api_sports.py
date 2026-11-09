@@ -84,9 +84,13 @@ def _response(data: Any) -> Any:
     if errors:
         if isinstance(errors, dict):
             msg = "; ".join(f"{k}: {v}" for k, v in errors.items())
+            keys = {k.lower() for k in errors}
         else:
             msg = "; ".join(str(e) for e in errors)
-        raise ProviderError(f"api_sports: {msg}")
+            keys = set()
+        kind = ("plan" if "plan" in keys else "auth" if keys & {"token", "key", "access"} else
+                "quota" if keys & {"requests", "ratelimit"} else "http")
+        raise ProviderError(f"api_sports: {msg}", kind)
     return data.get("response", [])
 
 
@@ -99,7 +103,7 @@ def _wdl(block: dict, venue: str) -> Optional[int]:
 
 class ApiSportsProvider:
     name = NAME
-    label = "API-Sports"
+    label = "API-Sports · api-sports.io"
 
     def __init__(self, repo: Repository, registry: Registry, settings: dict):
         self.repo, self.registry, self.settings = repo, registry, settings
@@ -116,9 +120,14 @@ class ApiSportsProvider:
             return summary
         status = self.repo.provider_status().get(NAME, {})
         per_sport_remaining = status.get("remaining_by_sport", {})
+        plan_limited = {k: v for k, v in (status.get("plan_limited") or {}).items() if v.get("until", "") > now.isoformat()}
+        auth_failed = False
         for sport in BASES:
             comps = [c for c in competitions if c["sport"] == sport and c.get("providers", {}).get("api_sports")]
-            if not comps:
+            if not comps or auth_failed:
+                continue
+            if sport in plan_limited:
+                summary["skipped"].append(f"{sport}: {plan_limited[sport]['message']} (paused 12h)")
                 continue
             limit = int(self.settings["api_sports_max_requests_per_refresh"])
             remaining = _int(per_sport_remaining.get(sport))
@@ -131,6 +140,14 @@ class ApiSportsProvider:
                     await self._competition(cc, budget, comp, now, summary)
                 except ProviderError as exc:
                     summary["errors"].append(f"{comp['name']}: {exc}")
+                    if exc.kind == "plan":
+                        # the same plan restriction applies to every league of this sport: stop and pause 12h
+                        plan_limited[sport] = {"message": str(exc).replace("api_sports: ", ""),
+                                               "until": (now + timedelta(hours=12)).isoformat()}
+                        break
+                    if exc.fatal:
+                        auth_failed = exc.kind == "auth"
+                        break
                 except Exception as exc:  # defensive: never let one league stop the refresh
                     log.exception("api_sports %s failed", comp["id"])
                     summary["errors"].append(f"{comp['name']}: internal error {type(exc).__name__}")
@@ -140,7 +157,7 @@ class ApiSportsProvider:
             rem = cc.last_headers.get("x-ratelimit-requests-remaining")
             if rem is not None:
                 per_sport_remaining[sport] = rem
-        fields = {"remaining_by_sport": per_sport_remaining}
+        fields = {"remaining_by_sport": per_sport_remaining, "plan_limited": plan_limited}
         if summary["errors"]:
             fields.update(last_error=summary["errors"][-1], last_error_at=now.isoformat())
         else:

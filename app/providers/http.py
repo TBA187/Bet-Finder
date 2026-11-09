@@ -17,7 +17,20 @@ log = logging.getLogger("betfinder.http")
 
 
 class ProviderError(Exception):
-    """A provider call failed.  The message is safe to show to the user."""
+    """A provider call failed.  The message is safe to show to the user.
+
+    ``kind`` lets callers react sensibly instead of repeating a doomed call:
+    auth (key rejected), quota (credits/rate limit used up), plan (paid plan
+    needed), budget (our own per-refresh cap), network, http."""
+
+    def __init__(self, message: str, kind: str = "http"):
+        super().__init__(message)
+        self.kind = kind
+
+    @property
+    def fatal(self) -> bool:
+        """Errors that will repeat for every further call in this refresh."""
+        return self.kind in ("auth", "quota", "plan")
 
 
 class Budget:
@@ -73,7 +86,7 @@ class CachedClient:
             if hit is not None:
                 return hit
         if budget is not None and not budget.take(what or url):
-            raise ProviderError(f"Request budget for this refresh used up (skipped: {what or url})")
+            raise ProviderError(f"Request budget for this refresh used up (skipped: {what or url})", "budget")
         last_exc: Optional[Exception] = None
         for attempt in range(3):
             try:
@@ -87,8 +100,14 @@ class CachedClient:
             if resp.status_code in (429, 500, 502, 503, 504) and attempt < 2:
                 await asyncio.sleep(1.0 * (attempt + 1))
                 continue
+            body = self._redact(resp.text[:300]).lower()
+            if resp.status_code in (401, 403, 429) and any(w in body for w in ("quota", "usage", "limit", "credits")):
+                raise ProviderError(f"{self.provider}: quota or rate limit reached (HTTP {resp.status_code})", "quota")
             if resp.status_code == 401 or resp.status_code == 403:
-                raise ProviderError(f"{self.provider}: API key rejected (HTTP {resp.status_code})")
+                raise ProviderError(f"{self.provider}: API key rejected (HTTP {resp.status_code}). "
+                                    f"Check that this key belongs to this service.", "auth")
+            if resp.status_code == 429:
+                raise ProviderError(f"{self.provider}: rate limit reached (HTTP 429)", "quota")
             if resp.status_code == 422:
                 raise ProviderError(f"{self.provider}: request rejected (HTTP 422) - {self._redact(resp.text[:200])}")
             if resp.status_code >= 400:
@@ -99,6 +118,7 @@ class CachedClient:
                 raise ProviderError(f"{self.provider}: response was not JSON") from None
             if ttl_seconds > 0:
                 self.repo.store.write(self._cache_name(self.provider, url, params),
-                                      {"fetched_at": datetime.now(timezone.utc).isoformat(), "data": data}, pretty=False)
+                                      {"fetched_at": datetime.now(timezone.utc).isoformat(), "data": data}, pretty=False,
+                                      ttl=max(ttl_seconds, 60) + 60)
             return data
-        raise ProviderError(f"{self.provider}: network error ({type(last_exc).__name__})")
+        raise ProviderError(f"{self.provider}: network error ({type(last_exc).__name__})", "network")

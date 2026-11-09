@@ -34,7 +34,7 @@ SPORT_SLUGS = {"handball": "handball", "mma": "mma", "boxing": "boxing"}
 
 class OddsPapiProvider:
     name = NAME
-    label = "OddsPapi"
+    label = "OddsPapi · oddspapi.io (free)"
     method = "api"
 
     def __init__(self, repo: Repository, registry: Registry, settings: dict):

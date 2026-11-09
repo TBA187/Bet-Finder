@@ -1,10 +1,12 @@
 """REST API used by the web UI (all routes are under /api)."""
 from __future__ import annotations
 
+import hmac
+import os
 from datetime import datetime, timedelta, timezone
 from typing import Literal, Optional
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, Field, field_validator
 
 from app.config import APP_VERSION
@@ -14,7 +16,6 @@ from app.core.names import find_fixture, search_score, slug
 from app.core.odds_math import validate_odds
 from app.core.sports import SPORTS, catalogue, is_sport
 from app.i18n import lang_of, tr
-from app.providers.demo import load_demo
 from app.providers.http import ProviderError
 from app.services import builder as bet_builder
 from app.services import insights, notify
@@ -172,7 +173,7 @@ def build_router(c) -> APIRouter:  # c: Container
             return fixture_or_404(body.fixture_id), "selected match"
         if not (body.sport and body.home and body.away):
             raise HTTPException(400, tr(L, "err_choose_match"))
-        pool = [f for f in c.repo.fixtures(include_demo=bool(s["demo_mode"]))
+        pool = [f for f in c.repo.fixtures(include_demo=False)
                 if f.kickoff > now - timedelta(hours=3) and f.status in ("scheduled", "live")]
         kickoff = body.kickoff.astimezone(timezone.utc) if body.kickoff else None
         hit = find_fixture(body.sport, body.home, body.away, kickoff, pool,
@@ -245,10 +246,12 @@ def build_router(c) -> APIRouter:  # c: Container
         s = settings()
         pstatus = c.repo.provider_status()
         now = utcnow()
-        fixtures = c.repo.fixtures(include_demo=bool(s["demo_mode"]))
+        fixtures = c.repo.fixtures(include_demo=False)
         usage = insights.usage(pstatus, s, c.refresh.providers(s), c.settings.secret_source, now)
         return {
-            "version": APP_VERSION, "now": now.isoformat(), "demo_mode": s["demo_mode"], "language": lang_of(s),
+            "version": APP_VERSION, "now": now.isoformat(), "language": lang_of(s),
+            "storage": {"kind": c.store.kind, "persistent": c.store.persistent, "vercel": bool(os.environ.get("VERCEL"))},
+            "cron_configured": bool(os.environ.get("CRON_SECRET")),
             "providers": usage["providers"], "manual_entry": True, "scraper_mode": s["scraper_mode"],
             "last_refresh": c.refresh.last(), "refresh_running": c.refresh.running,
             "fixtures": len(fixtures), "fixtures_with_odds": sum(1 for fx in fixtures if c.repo.quotes(fx.id)),
@@ -260,6 +263,61 @@ def build_router(c) -> APIRouter:  # c: Container
     @r.post("/refresh")
     async def refresh():
         return await c.refresh.run()
+
+    @r.get("/cron/refresh")
+    async def cron_refresh(request: Request):
+        """For schedulers (Vercel Cron, GitHub Actions, cron-job.org).
+        Send header  Authorization: Bearer <CRON_SECRET>  (or the BETFINDER_TOKEN)."""
+        secret = os.environ.get("CRON_SECRET", "").strip() or c.token
+        if secret:
+            sent = request.headers.get("authorization", "")
+            if not hmac.compare_digest(sent, f"Bearer {secret}"):
+                raise HTTPException(401, "Invalid cron secret")
+        elif os.environ.get("VERCEL"):
+            raise HTTPException(401, "Set CRON_SECRET in the Vercel environment variables first")
+        result = await c.refresh.run()
+        return {"status": result.get("status"), "at": result.get("at"), "odds_methods": result.get("odds_methods"),
+                "quotes": sum(p.get("quotes", 0) for p in result.get("providers", [])),
+                "errors": [e for p in result.get("providers", []) for e in p.get("errors", [])][:5],
+                "notifications": result.get("notifications")}
+
+    @r.post("/providers/{name}/test")
+    async def test_provider(name: Literal["the_odds_api", "api_sports", "odds_api_io", "oddspapi"]):
+        """Check a key with the cheapest call each service offers.  The key is never echoed back."""
+        import httpx
+        s = settings()
+        key = s[{"the_odds_api": "odds_api_key", "api_sports": "api_sports_key", "odds_api_io": "odds_api_io_key",
+                 "oddspapi": "oddspapi_key"}[name]]
+        if not key:
+            return {"ok": False, "code": "no_key"}
+        try:
+            async with httpx.AsyncClient(timeout=15) as client:
+                if name == "the_odds_api":  # free call
+                    resp = await client.get("https://api.the-odds-api.com/v4/sports", params={"apiKey": key})
+                    info = {"remaining": resp.headers.get("x-requests-remaining"), "used": resp.headers.get("x-requests-used")}
+                elif name == "api_sports":  # /status does not count against the quota
+                    resp = await client.get("https://v3.football.api-sports.io/status", headers={"x-apisports-key": key})
+                    data = resp.json() if resp.status_code == 200 else {}
+                    if data.get("errors"):
+                        return {"ok": False, "code": "rejected", "detail": str(data["errors"])[:200]}
+                    sub = (data.get("response") or {}).get("subscription") or {}
+                    req = (data.get("response") or {}).get("requests") or {}
+                    info = {"plan": sub.get("plan"), "requests_today": req.get("current"), "limit_day": req.get("limit_day")}
+                    if str(sub.get("plan", "")).lower() == "free":
+                        return {"ok": True, "code": "free_plan", "info": info}
+                elif name == "odds_api_io":
+                    resp = await client.get("https://api.odds-api.io/v3/bookmakers/selected", params={"apiKey": key})
+                    info = {}
+                else:  # oddspapi: uses 1 of the monthly free requests
+                    resp = await client.get("https://api.oddspapi.io/v4/sports", params={"apiKey": key})
+                    info = {}
+        except httpx.HTTPError as exc:
+            return {"ok": False, "code": "network", "detail": type(exc).__name__}
+        if resp.status_code in (401, 403):
+            return {"ok": False, "code": "rejected"}
+        if resp.status_code >= 400:
+            return {"ok": False, "code": "error", "detail": f"HTTP {resp.status_code}"}
+        return {"ok": True, "code": "ok", "info": info}
 
     @r.get("/usage")
     def usage():
@@ -335,7 +393,7 @@ def build_router(c) -> APIRouter:  # c: Container
         s = settings()
         now = utcnow()
         scored = []
-        for fx in c.repo.fixtures(include_demo=bool(s["demo_mode"])):
+        for fx in c.repo.fixtures(include_demo=False):
             if (sport and fx.sport != sport) or fx.kickoff < now - timedelta(hours=3):
                 continue
             score = search_score(q, fx.home, fx.away)
@@ -571,14 +629,7 @@ def build_router(c) -> APIRouter:  # c: Container
 
     @r.put("/settings")
     def put_settings(patch: dict):
-        before = settings()["demo_mode"]
-        result = c.settings.update(patch)
-        after = settings()["demo_mode"]
-        if after and not before:
-            load_demo(c.repo, c.registry, utcnow())
-        elif before and not after:
-            c.repo.remove_demo_data()
-        return result
+        return c.settings.update(patch)
 
     @r.post("/notify/test")
     async def notify_test():

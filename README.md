@@ -1,4 +1,4 @@
-# BetFinder 1.2
+# BetFinder 1.3
 
 BetFinder scans bookmaker odds and looks for:
 
@@ -8,7 +8,7 @@ BetFinder scans bookmaker odds and looks for:
 
 It covers **team sports** (football, basketball, handball, ice hockey, NFL, baseball), **combat sports** (UFC/MMA, boxing) and **racket sports** (tennis). Ten analysis agents assess each match independently. **Daily Picks** builds up to three value coupons per day. The interface is mobile-first, works in **English and Danish**, and can be installed on a phone's home screen.
 
-> **Honesty rule:** BetFinder never invents odds, injuries, lineups or results. Every price and data point is labelled with its source and age: *Live API*, *Scraped*, *Manual*, *Historical*, *Demo* or *Missing*.
+> **Honesty rule:** BetFinder never invents odds, injuries, lineups or results. Every price and data point is labelled with its source and age: *Live API*, *Scraped*, *Manual*, *Historical* or *Missing*. There is no demo or sample data.
 
 ---
 
@@ -21,9 +21,11 @@ pip install -r requirements.txt
 uvicorn main:app --host 127.0.0.1 --port 8000
 ```
 
-Open <http://localhost:8000>. Turn on **demo mode** under *More → Sources & settings* to see everything working with fictional data. Add API keys there when you are ready for real odds.
+Open <http://localhost:8000> and follow the **Get started** box on the dashboard: get a free key from The Odds API (and OddsPapi), paste it under *More → Sources*, and press ⟳.
 
-Run the tests with `pip install -r requirements-dev.txt` and then `pytest` (90 tests).
+**Step-by-step guide for API keys and Vercel: [SETUP.md](SETUP.md).**
+
+Run the tests with `pip install -r requirements-dev.txt` and then `pytest` (95 tests).
 
 ## Where the odds come from: the fallback chain
 
@@ -96,7 +98,17 @@ Formulas:
 - **Leagues**: 107 competitions (Danish Superliga, La Liga, Allsvenskan, the Big 5, Champions League, Herreligaen, Basketligaen, EHF, NHL, SHL, UFC, ATP/WTA and more). Switch them on or off in the app, or add more in `data/registry/competitions.json`.
 - **Bookmakers**: 51 in the registry. Tick "Mine" for the bookmakers where you have a normal betting account, and picks will only use their prices.
 
-## Going live (a website that checks automatically and recommends bets)
+## Going live on Vercel
+
+See **[SETUP.md](SETUP.md)**. In short:
+
+1. Connect **Upstash Redis** (free) under Vercel → Storage, because Vercel has no permanent disk.
+2. Add your keys plus `BETFINDER_TOKEN` and `CRON_SECRET` as environment variables, then redeploy.
+3. Add `BETFINDER_URL` and `CRON_SECRET` as GitHub secrets. The included GitHub Action then refreshes hourly, since the free Vercel plan's cron job runs only once a day.
+
+`vercel.json`, `pyproject.toml` and `.vercelignore` are already set up: Frankfurt region, 300 s max duration and a daily cron job.
+
+## Going live on your own server (Docker)
 
 1. **Get a small server.** A VPS such as Hetzner CX22 (about €4/month) or DigitalOcean ($6/month) with Docker installed.
 2. **Point a domain** (e.g. `bets.yourdomain.dk`) at the server's IP address.

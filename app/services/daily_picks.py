@@ -28,15 +28,17 @@ MAX_CANDIDATES = 30
 
 
 def day_window(now: datetime, settings: dict) -> tuple[datetime, datetime, str]:
-    """From now until the configured end-of-day hour (default 06:00 local)."""
+    """From now until tomorrow's end-of-day hour (default 06:00 local).
+
+    At 19:00 the window runs to 06:00 tomorrow (tonight's matches).  After
+    midnight (e.g. 02:00) it also runs to 06:00 *tomorrow*, so the coming day
+    is included instead of a 4-hour window with almost no matches."""
     zone = tz(settings)
     local = now.astimezone(zone)
     end_hour = int(settings.get("day_end_hour", 6))
-    end = local.replace(hour=end_hour, minute=0, second=0, microsecond=0)
-    if local.hour >= end_hour:
-        end += timedelta(days=1)
-    day = (end - timedelta(days=1)).date() if end_hour > 0 else local.date()
-    return now, end.astimezone(now.tzinfo), day.isoformat()
+    end = local.replace(hour=end_hour, minute=0, second=0, microsecond=0) + timedelta(days=1)
+    day = local.date().isoformat()
+    return now, end.astimezone(now.tzinfo), day
 
 
 def _leg(analysis: dict, sel: dict) -> dict:

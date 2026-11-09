@@ -199,8 +199,8 @@ M: dict[str, tuple[str, str]] = {
                          "Der findes kvalificerede valg, men ingen kombination af op til {n} når odds over {target}."),
     "dp_coupon": ("Coupon {n}", "Kupon {n}"),
     "dp_indep": ("Legs are from different matches and treated as independent.", "Valgene er fra forskellige kampe og behandles som uafhængige."),
-    "refresh_no_source": ("No data provider is configured. Add an API key under Sources, enter odds manually, or switch on demo mode.",
-                          "Ingen dataudbyder er sat op. Tilføj en API-nøgle under Kilder, indtast odds manuelt, eller slå demotilstand til."),
+    "refresh_no_source": ("No live data source delivered odds. Add a free API key under Sources (see the setup guide) or enter odds manually.",
+                          "Ingen live datakilde leverede odds. Tilføj en gratis API-nøgle under Kilder (se opsætningsguiden), eller indtast odds manuelt."),
     "tracker_daily": ("Daily pick {day} – {title}", "Dagens spil {day} – {title}"),
     # ---- API errors shown to the user
     "err_choose_match": ("Choose a match, or give sport, home and away teams.", "Vælg en kamp, eller angiv sport, hjemme- og udehold."),

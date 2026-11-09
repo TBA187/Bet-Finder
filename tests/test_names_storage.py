@@ -1,3 +1,4 @@
+import json
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -63,3 +64,68 @@ def test_store_rejects_path_traversal(tmp_path):
     s = JsonStore(tmp_path)
     with pytest.raises(ValueError):
         s.write("../evil", {})
+
+
+def _fake_upstash():
+    """In-memory stand-in for the Upstash REST API."""
+    import httpx
+    db = {}
+
+    def handler(request):
+        cmd = json.loads(request.content)
+        op = cmd[0].upper()
+        if op == "SET":
+            db[cmd[1]] = cmd[2]
+            return httpx.Response(200, json={"result": "OK"})
+        if op == "GET":
+            return httpx.Response(200, json={"result": db.get(cmd[1])})
+        if op == "DEL":
+            n = sum(1 for k in cmd[1:] if db.pop(k, None) is not None)
+            return httpx.Response(200, json={"result": n})
+        if op == "EXISTS":
+            return httpx.Response(200, json={"result": int(cmd[1] in db)})
+        if op == "SCAN":
+            pattern = cmd[3].rstrip("*")
+            return httpx.Response(200, json={"result": ["0", [k for k in db if k.startswith(pattern)]]})
+        return httpx.Response(400, json={"error": "unknown"})
+    return db, httpx.Client(transport=httpx.MockTransport(handler))
+
+
+def test_redis_store_roundtrip():
+    from app.storage.json_store import RedisStore
+    db, client = _fake_upstash()
+    s = RedisStore("https://fake.upstash.io", "tok")
+    s._client = client
+    s.write("odds/fx-1", {"a": 1})
+    s.write("odds/fx-2", {"b": 2})
+    assert all(v.startswith("z:") for v in db.values())  # stored compressed
+    s._cache.clear()
+    assert s.read("odds/fx-1", {}) == {"a": 1}
+    with s.edit("odds/fx-1", {}) as d:
+        d["c"] = 3
+    s._cache.clear()
+    assert s.read("odds/fx-1", {}) == {"a": 1, "c": 3}
+    assert s.list("odds/") == ["odds/fx-1", "odds/fx-2"]
+    s.delete("odds/fx-2")
+    assert not s.exists("odds/fx-2") and s.read("missing", {"d": 1}) == {"d": 1}
+
+
+def test_repository_works_on_redis(monkeypatch):
+    from app.services.repository import Repository
+    from app.storage.json_store import RedisStore
+    from tests.conftest import NOW, add_prices, make_fixture
+    _db, client = _fake_upstash()
+    s = RedisStore("https://fake.upstash.io", "tok")
+    s._client = client
+    repo = Repository(s)
+    fx = make_fixture(repo)
+    add_prices(repo, fx, "pinnacle", {"home": 2.0, "draw": 3.4, "away": 3.9})
+    assert len(repo.quotes(fx.id)) == 3 and fx.id in repo.all_quotes()
+
+
+def test_file_store_migrates_single_odds_file(tmp_path):
+    from app.services.repository import Repository
+    s = JsonStore(tmp_path)
+    s.write("odds", {"fx-9": {"k": {"x": 1}}})
+    Repository(s)
+    assert not s.exists("odds") and s.read("odds/fx-9", {}) == {"k": {"x": 1}}

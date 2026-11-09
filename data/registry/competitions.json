@@ -574,7 +574,7 @@
    "sport": "football",
    "name": "UEFA Nations League",
    "country": "Europe",
-   "enabled": false,
+   "enabled": true,
    "providers": {
     "the_odds_api": "soccer_uefa_nations_league",
     "api_sports": {

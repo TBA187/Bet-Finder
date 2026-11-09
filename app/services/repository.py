@@ -2,7 +2,7 @@
 
 Files:
     fixtures.json        {fixture_id: Fixture}
-    odds.json            {fixture_id: {quote_key: Quote (+history)}}
+    odds/<fixture>.json  {quote_key: Quote (+history)}  - one document per match
     team_news.json       manual absences / lineup notes per fixture
     provider_news.json   absences / lineups fetched from providers
     team_stats.json      cached normalised team statistics
@@ -23,7 +23,7 @@ from pydantic import ValidationError
 
 from app.core.models import Absence, Fixture, LineupInfo, Quote, TeamStats, utcnow
 from app.core.names import find_fixture, slug
-from app.storage.json_store import JsonStore
+from app.storage.json_store import BaseStore
 
 log = logging.getLogger("betfinder.repository")
 
@@ -35,9 +35,24 @@ def fixture_id_for(sport: str, home: str, away: str, kickoff: datetime) -> str:
     return f"{sport[:2]}-{kickoff:%Y%m%d}-{slug(home)}-{slug(away)}-{digest}"
 
 
+def _odds_name(fid: str) -> str:
+    return f"odds/{fid}"
+
+
 class Repository:
-    def __init__(self, store: JsonStore):
+    def __init__(self, store: BaseStore):
         self.store = store
+        self._migrate()
+
+    def _migrate(self) -> None:
+        """v1.1 kept all odds in one odds.json; split it into one document per match."""
+        try:
+            if self.store.exists("odds"):
+                for fid, book in (self.store.read("odds", {}) or {}).items():
+                    self.store.write(_odds_name(fid), book, pretty=False)
+                self.store.delete("odds")
+        except Exception:  # never block start-up
+            log.exception("odds migration failed")
 
     # ------------------------------------------------------------------ fixtures
     def _load_fixtures(self) -> dict[str, Fixture]:
@@ -132,19 +147,23 @@ class Repository:
             for fid in ids:
                 if data.pop(fid, None) is not None:
                     removed += 1
-        for name in ("odds", "team_news", "provider_news", "h2h"):
-            with self.store.edit(name, {}, pretty=name not in ("odds",)) as data:
+        for fid in ids:
+            self.store.delete(_odds_name(fid))
+        for name in ("team_news", "provider_news", "h2h"):
+            with self.store.edit(name, {}) as data:
                 for fid in ids:
                     data.pop(fid, None)
         return removed
 
     # -------------------------------------------------------------------- quotes
     def quotes(self, fid: str) -> list[Quote]:
-        return self._parse_quotes(self.store.read("odds", {}).get(fid, {}))
+        return self._parse_quotes(self.store.read(_odds_name(fid), {}))
 
     def all_quotes(self) -> dict[str, list[Quote]]:
-        raw = self.store.read("odds", {})
-        return {fid: self._parse_quotes(items) for fid, items in raw.items()} if isinstance(raw, dict) else {}
+        out = {}
+        for name in self.store.list("odds/"):
+            out[name.split("/", 1)[1]] = self._parse_quotes(self.store.read(name, {}))
+        return out
 
     @staticmethod
     def _parse_quotes(items: dict) -> list[Quote]:
@@ -162,8 +181,7 @@ class Repository:
         ``replace_source`` removes this source's quotes for the fixture that
         were not part of this update (market suspended / bookmaker removed)."""
         changed = 0
-        with self.store.edit("odds", {}, pretty=False) as data:
-            book = data.setdefault(fid, {})
+        with self.store.edit(_odds_name(fid), {}, pretty=False) as book:
             seen = set()
             for q in quotes:
                 key = q.key
@@ -183,8 +201,7 @@ class Repository:
 
     def delete_quotes(self, fid: str, source: Optional[str] = None, bookmaker: Optional[str] = None) -> int:
         removed = 0
-        with self.store.edit("odds", {}, pretty=False) as data:
-            book = data.get(fid, {})
+        with self.store.edit(_odds_name(fid), {}, pretty=False) as book:
             for key in list(book):
                 v = book[key]
                 if (source is None or v.get("source") == source) and (bookmaker is None or v.get("bookmaker") == bookmaker):
@@ -296,7 +313,26 @@ class Repository:
     def prune(self, retention_days: int, keep: set[str]) -> int:
         cutoff = utcnow() - timedelta(days=retention_days)
         old = [f.id for f in self.fixtures() if f.kickoff < cutoff and f.id not in keep]
+        self.store.cleanup("cache/", 3 * 86400)  # provider response cache (Redis expires it by itself)
         return self.delete_fixtures(old)
 
-    def remove_demo_data(self) -> int:
-        return self.delete_fixtures([f.id for f in self.fixtures() if f.is_demo])
+    def purge_demo(self) -> int:
+        """Remove everything created by the old demo mode (BetFinder is live-data only)."""
+        removed = self.delete_fixtures([f.id for f in self.fixtures() if f.is_demo])
+        stats = self.store.read("team_stats", {})
+        if any(k.startswith("demo:") for k in stats):
+            with self.store.edit("team_stats", {}, pretty=False) as data:
+                for k in [k for k in data if k.startswith("demo:")]:
+                    del data[k]
+        bets = self.store.read("bets", [])
+        if any(b.get("is_demo") for b in bets):
+            with self.store.edit("bets", []) as data:
+                data[:] = [b for b in data if not b.get("is_demo")]
+        picks = self.store.read("daily_picks", {})
+        if any(c.get("is_demo") for d in picks.values() for c in (d.get("coupons") or {}).values()):
+            self.store.write("daily_picks", {})
+        settings = self.store.read("settings", {})
+        if "demo_mode" in settings:
+            with self.store.edit("settings", {}) as data:
+                data.pop("demo_mode", None)
+        return removed

@@ -249,3 +249,65 @@ def test_manual_xg_feeds_the_model(client):
     st = next(ag for ag in a["agents"] if ag["agent"] == "statistics")
     assert any("xG" in f for f in st["findings"]) and st["lean_home"] > 0
     assert any(d["kind"] == "statistics" and d["status"] == "manual" for d in a["data_status"])
+
+
+# ------------------------------------------------------------------ v1.3 robustness fixes
+def test_api_sports_free_plan_stops_early_and_pauses(repo, registry, settings):
+    from app.providers.api_sports import ApiSportsProvider
+    calls = []
+
+    def handler(request):
+        calls.append(request.url.path)
+        return httpx.Response(200, json={"errors": {"plan": "Free plans do not have access to this season, try from 2022 to 2024."},
+                                         "response": []})
+    comps = [c for c in registry.competitions(sport="football", enabled_only=True)]
+    assert len(comps) > 5
+    prov = ApiSportsProvider(repo, registry, {**settings, "api_sports_key": "k"})
+
+    async def run():
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            first = await prov.refresh(client, comps, utcnow())
+            second = await prov.refresh(client, comps, utcnow())
+        return first, second
+    first, second = asyncio.run(run())
+    assert len(first["errors"]) == 1 and len(calls) == 1  # one failing call, not one per league
+    assert any("paused" in s for s in second["skipped"]) and len(calls) == 1
+    u = insights.usage(repo.provider_status(), settings, [prov], lambda k: "settings", utcnow())
+    assert u["providers"][0]["state"] == "plan_limited" and u["providers"][0]["hint"] == "free_plan_seasons"
+
+
+def test_rejected_key_stops_odds_api_io(repo, registry, settings):
+    calls = []
+
+    def handler(request):
+        calls.append(request.url.path)
+        if request.url.path.endswith("/sports"):
+            return httpx.Response(200, json=[{"name": "Football", "slug": "football"}, {"name": "Basketball", "slug": "basketball"}])
+        return httpx.Response(401, json={"error": "invalid key"})
+    make_fixture(repo, hours=5, now=utcnow())
+    make_fixture(repo, sport="basketball", home="Hoop A", away="Hoop B", hours=5, now=utcnow(), competition_id="basketball.nba",
+                 competition_name="NBA")
+    prov = OddsApiIoProvider(repo, registry, {**settings, "odds_api_io_key": "wrong"})
+
+    async def run():
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            return await prov.refresh(client, [], utcnow())
+    r = asyncio.run(run())
+    assert len(r["errors"]) == 1 and "rejected" in r["errors"][0]
+    assert calls.count("/v3/events") == 1  # stopped after the first rejection
+    u = insights.usage(repo.provider_status(), settings, [prov], lambda k: "settings", utcnow())
+    assert u["providers"][0]["state"] == "error" and u["providers"][0]["hint"] == "key_rejected"
+
+
+def test_daily_window_after_midnight_covers_the_next_day(settings):
+    from datetime import datetime, timezone
+    from app.services.daily_picks import day_window
+    _, end, day = day_window(datetime(2026, 11, 9, 1, 21, tzinfo=timezone.utc), settings)  # 02:21 in Copenhagen
+    assert day == "2026-11-09" and end == datetime(2026, 11, 10, 5, 0, tzinfo=timezone.utc)
+    _, end, _ = day_window(datetime(2026, 11, 9, 18, 0, tzinfo=timezone.utc), settings)  # 19:00
+    assert end == datetime(2026, 11, 10, 5, 0, tzinfo=timezone.utc)
+
+
+def test_provider_key_test_endpoint_without_key(client):
+    r = client.post("/api/providers/the_odds_api/test").json()
+    assert r == {"ok": False, "code": "no_key"}

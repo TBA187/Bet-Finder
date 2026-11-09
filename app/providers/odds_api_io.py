@@ -28,7 +28,7 @@ NAME = "odds_api_io"
 
 class OddsApiIoProvider:
     name = NAME
-    label = "odds-api.io"
+    label = "odds-api.io (paid)"
     method = "api"
 
     def __init__(self, repo: Repository, registry: Registry, settings: dict):
@@ -73,6 +73,8 @@ class OddsApiIoProvider:
                 events = as_list(await cc.get_json(f"{BASE}/events", params={"apiKey": self.key, "sport": slug}, ttl_seconds=1800))
             except ProviderError as exc:
                 summary["errors"].append(f"{sport}: {exc}")
+                if exc.fatal:  # a rejected key fails for every sport: stop now
+                    break
                 continue
             matched = {}
             for ev in events:

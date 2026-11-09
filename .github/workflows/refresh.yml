@@ -1,0 +1,27 @@
+# Calls BetFinder's refresh endpoint every hour (06:00-23:00 UTC), because the
+# free Vercel plan only allows one cron job run per day.
+# Setup: GitHub repo -> Settings -> Secrets and variables -> Actions -> add
+#   BETFINDER_URL  = https://your-project.vercel.app   (no trailing slash)
+#   CRON_SECRET    = the same value as CRON_SECRET in Vercel
+name: BetFinder refresh
+
+on:
+  schedule:
+    - cron: "5 6-23 * * *"
+  workflow_dispatch:
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - name: Trigger refresh
+        env:
+          URL: ${{ secrets.BETFINDER_URL }}
+          SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          if [ -z "$URL" ] || [ -z "$SECRET" ]; then
+            echo "BETFINDER_URL / CRON_SECRET secrets not set - skipping."
+            exit 0
+          fi
+          curl -fsS --max-time 300 -H "Authorization: Bearer $SECRET" "$URL/api/cron/refresh"

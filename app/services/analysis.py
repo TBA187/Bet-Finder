@@ -101,9 +101,6 @@ class AnalysisService:
             if h and a:
                 home, away = h, a
                 break
-        if home is None:
-            home = self.repo.team_stats(f"demo:{fx.competition_id}:{fx.home}")
-            away = self.repo.team_stats(f"demo:{fx.competition_id}:{fx.away}")
         # manually entered xG overrides / supplements provider data
         out = []
         for side, stats, team in (("home", home, fx.home), ("away", away, fx.away)):

@@ -17,7 +17,7 @@ def test_status_is_honest_without_sources(client):
     picks = client.get("/api/daily-picks").json()
     assert picks["message"] == "No qualifying value bets found today."
     r = client.post("/api/refresh").json()
-    assert "No data provider" in r["message"]
+    assert "No live data source" in r["message"]
 
 
 def test_bookmaker_coverage_marks_manual_only(client):
@@ -42,17 +42,46 @@ def test_all_requested_leagues_and_sports_present(client):
     assert set(cat["categories"]) == {"team", "combat", "racket"} and "mma" in cat["sports"]
 
 
-def test_demo_mode_end_to_end(client):
-    assert client.put("/api/settings", json={"demo_mode": True}).status_code == 200
+def test_live_only_no_demo(client):
+    s = client.get("/api/settings").json()
+    assert "demo_mode" not in s
+    assert client.put("/api/settings", json={"demo_mode": True}).status_code == 400
+    st = client.get("/api/status").json()
+    assert st["storage"]["kind"] == "files" and st["storage"]["persistent"]
+    # real (manually entered) prices flow through scanner, analysis and picks
+    ko = (utcnow() + timedelta(hours=5)).isoformat()
+    for book, prices in (("pinnacle", {"home": 2.0, "draw": 3.5, "away": 3.9}), ("nordicbet", {"home": 2.3, "draw": 3.3, "away": 3.6})):
+        client.post("/api/manual/odds", json={"sport": "football", "home": "Live A", "away": "Live B", "kickoff": ko,
+                                              "bookmaker": book, "market": "h2h", "prices": prices})
     items = client.get("/api/scanner").json()["items"]
-    assert items and all(i["fixture"]["is_demo"] for i in items)
-    fid = items[0]["fixture"]["id"]
-    a = client.get(f"/api/fixtures/{fid}").json()
-    assert len(a["agents"]) == 10 and a["markets"] and "team_news" in a
-    picks = client.get("/api/daily-picks").json()
-    assert picks["coupons"] or picks["message"]
-    client.put("/api/settings", json={"demo_mode": False})
-    assert client.get("/api/scanner").json()["items"] == []
+    assert items and not any(i["fixture"]["is_demo"] for i in items)
+    a = client.get(f"/api/fixtures/{items[0]['fixture']['id']}").json()
+    assert {d["status"] for d in a["data_status"] if d["kind"] == "odds"} == {"manual"}
+
+
+def test_old_demo_data_is_purged(paths):
+    from app.core.models import Fixture
+    from app.main import create_app
+    from app.services.repository import Repository
+    from app.storage.json_store import JsonStore
+    repo = Repository(JsonStore(paths.runtime))
+    repo.save_fixture(Fixture(id="old-demo", sport="football", competition_id="demo.football", competition_name="Demo",
+                              home="Demo A", away="Demo B", kickoff=utcnow() + timedelta(hours=2), is_demo=True))
+    repo.store.write("settings", {"demo_mode": True})
+    create_app(paths, background=False)
+    assert repo.fixture("old-demo") is None and "demo_mode" not in repo.store.read("settings", {})
+
+
+def test_cron_endpoint_auth(paths, monkeypatch):
+    from fastapi.testclient import TestClient
+    from app.main import create_app
+    monkeypatch.setenv("CRON_SECRET", "cron-123")
+    with TestClient(create_app(paths, background=False)) as c:
+        c.put("/api/settings", json={"scraper_mode": "off"})
+        assert c.get("/api/cron/refresh").status_code == 401
+        assert c.get("/api/cron/refresh", headers={"Authorization": "Bearer wrong"}).status_code == 401
+        r = c.get("/api/cron/refresh", headers={"Authorization": "Bearer cron-123"})
+        assert r.status_code == 200 and r.json()["odds_methods"] == []
 
 
 def test_manual_entry_creates_then_matches_fixture(client):

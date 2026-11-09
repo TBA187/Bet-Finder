@@ -7,6 +7,7 @@ skips competitions that are out of season.
 """
 from __future__ import annotations
 
+import asyncio
 import fnmatch
 import logging
 from datetime import datetime, timedelta, timezone
@@ -42,7 +43,7 @@ def _parse_time(value: Optional[str]) -> Optional[datetime]:
 
 class TheOddsApiProvider:
     name = NAME
-    label = "The Odds API"
+    label = "The Odds API · the-odds-api.com"
 
     def __init__(self, repo: Repository, registry: Registry, settings: dict):
         self.repo, self.registry, self.settings = repo, registry, settings
@@ -68,6 +69,7 @@ class TheOddsApiProvider:
         markets = ",".join(self.settings.get("odds_api_markets") or ["h2h"])
         horizon = now + timedelta(hours=int(self.settings.get("lookahead_hours", 48)))
         summary["exhausted"] = False
+        jobs = []
         for comp in competitions:
             pattern = comp.get("providers", {}).get("the_odds_api")
             if not pattern:
@@ -77,34 +79,39 @@ class TheOddsApiProvider:
             if not keys or (keys == [pattern] and pattern not in active):
                 summary["skipped"].append(f"{comp['name']}: not in season at The Odds API")
                 continue
-            for sport_key in keys:
+            jobs += [(comp, k) for k in keys]
+        window = {"commenceTimeFrom": _iso(now), "commenceTimeTo": _iso(horizon)}
+        sem = asyncio.Semaphore(4)
+        stop = asyncio.Event()
+
+        async def run(comp, sport_key):
+            async with sem:
+                if stop.is_set():
+                    return
                 if self._credits_low(cc):
                     summary["exhausted"] = True
-                    summary["skipped"].append(f"{comp['name']}: The Odds API credits used up")
-                    break
-                window = {"commenceTimeFrom": _iso(now), "commenceTimeTo": _iso(horizon)}
+                    stop.set()
+                    return
                 try:
                     # the events list is free: only spend credits when there are matches in the window
                     upcoming = await cc.get_json(f"{BASE}/sports/{sport_key}/events",
                                                  params={"apiKey": self.key, "dateFormat": "iso", **window}, ttl_seconds=1800)
-                except ProviderError as exc:
-                    summary["errors"].append(f"{comp['name']}: {exc}")
-                    continue
-                if not upcoming:
-                    summary["skipped"].append(f"{comp['name']} ({sport_key}): no matches in the window")
-                    continue
-                params = {"apiKey": self.key, "regions": regions, "markets": markets, "oddsFormat": "decimal",
-                          "dateFormat": "iso", **window}
-                try:
+                    if not upcoming:
+                        summary["skipped"].append(f"{comp['name']} ({sport_key}): no matches in the window")
+                        return
+                    params = {"apiKey": self.key, "regions": regions, "markets": markets, "oddsFormat": "decimal",
+                              "dateFormat": "iso", **window}
                     events = await cc.get_json(f"{BASE}/sports/{sport_key}/odds", params=params, ttl_seconds=600)
                 except ProviderError as exc:
                     summary["errors"].append(f"{comp['name']}: {exc}")
-                    if "401" in str(exc) or "quota" in str(exc).lower() or "429" in str(exc):
+                    if exc.kind == "quota":
                         summary["exhausted"] = True
-                    continue
+                    if exc.fatal:
+                        stop.set()
+                    return
                 if not isinstance(events, list):
                     summary["errors"].append(f"{comp['name']}: unexpected response")
-                    continue
+                    return
                 for ev in events:
                     try:
                         n = self._ingest(ev, comp, now)
@@ -114,6 +121,8 @@ class TheOddsApiProvider:
                     if n is not None:
                         summary["fixtures"] += 1
                         summary["quotes"] += n
+
+        await asyncio.gather(*(run(c, k) for c, k in jobs))
         summary["results"] = await self._scores(cc, competitions, now, summary)
         status = {"last_ok": now.isoformat()} if not summary["errors"] else {"last_error": summary["errors"][-1], "last_error_at": now.isoformat()}
         if cc.last_headers.get("x-requests-remaining") is not None:

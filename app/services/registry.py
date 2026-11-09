@@ -17,16 +17,6 @@ from app.storage.json_store import JsonStore
 
 log = logging.getLogger("betfinder.registry")
 
-DEMO_BOOKMAKERS = [
-    {"key": "demo_sharp", "name": "Demo Sharp", "type": "sharp"},
-    {"key": "demo_book_a", "name": "Demo Book A", "type": "soft"},
-    {"key": "demo_book_b", "name": "Demo Book B", "type": "soft"},
-    {"key": "demo_book_c", "name": "Demo Book C", "type": "soft"},
-    {"key": "demo_book_d", "name": "Demo Book D", "type": "soft"},
-    {"key": "demo_book_e", "name": "Demo Book E", "type": "soft"},
-]
-
-
 def _norm(name: str) -> str:
     return re.sub(r"[^a-z0-9]+", "", (name or "").lower())
 
@@ -41,8 +31,6 @@ class Registry:
         self._competitions = self._load(registry_dir / "competitions.json", "competitions")
         self._competitions = [c for c in self._competitions if self._valid_competition(c)]
         self.by_key = {b["key"]: b for b in self._bookmakers if "key" in b}
-        for demo in DEMO_BOOKMAKERS:
-            self.by_key.setdefault(demo["key"], {**demo, "demo": True, "sources": {}})
         self._alias: dict[str, str] = {}
         self._odds_api: dict[str, tuple[str, int]] = {}
         for b in self._bookmakers:

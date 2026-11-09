@@ -22,7 +22,6 @@ from app.config import APP_VERSION, SettingsService
 from app.core.models import utcnow
 from app.i18n import lang_of, tr
 from app.providers.api_sports import ApiSportsProvider
-from app.providers.demo import load_demo
 from app.providers.odds_api_io import OddsApiIoProvider
 from app.providers.oddspapi import OddsPapiProvider
 from app.providers.scraper import ScraperProvider
@@ -77,14 +76,17 @@ class RefreshService:
         async with httpx.AsyncClient(timeout=httpx.Timeout(20.0, connect=10.0),
                                      headers={"User-Agent": f"BetFinder/{APP_VERSION}"}) as client:
             primary_ok = False
+            primary = [p for p in (odds_api, api_sports, odds_io) if p.configured()]
             for prov in (odds_api, api_sports, odds_io):
                 if not prov.configured():
                     chain.append({"provider": prov.name, "method": "api", "ran": False, "reason": "not_configured"})
-                    continue
-                s = await self._safe(prov, client, competitions, now)
+            # the API sources are independent: run them at the same time
+            results = await asyncio.gather(*(self._safe(p, client, competitions, now) for p in primary))
+            for prov, s in zip(primary, results):
                 summaries.append(s)
+                failed = bool(s.get("errors")) and not s.get("quotes")
                 chain.append({"provider": prov.name, "method": "api", "ran": True, "quotes": s.get("quotes", 0),
-                              "reason": "exhausted" if s.get("exhausted") else "ok"})
+                              "reason": "exhausted" if s.get("exhausted") else "error" if failed else "ok"})
                 if prov is odds_api and not s.get("exhausted") and not any("rejected" in e for e in s.get("errors", [])):
                     primary_ok = True
                 if prov is api_sports and s.get("quotes", 0) > 0:
@@ -109,7 +111,6 @@ class RefreshService:
             else:
                 chain.append({"provider": scraper.name, "method": "scraping", "ran": False,
                               "reason": "off" if mode == "off" else "not_needed"})
-            demo = load_demo(self.repo, self.registry, now) if settings["demo_mode"] else None
             pruned = self.repo.prune(int(settings["retention_days"]), keep=self.tracker.referenced_fixtures())
             self.tracker.refresh(settings)
             if self.after:
@@ -125,10 +126,9 @@ class RefreshService:
             "providers": summaries,
             "chain": chain,
             "odds_methods": methods,
-            "demo_fixtures": demo,
             "pruned_fixtures": pruned,
             "notifications": after_result,
-            "message": None if delivered or demo else tr(lang_of(settings), "refresh_no_source"),
+            "message": None if methods else tr(lang_of(settings), "refresh_no_source"),
         }
         self.repo.update_provider_status("_last_refresh", **result)
         return result

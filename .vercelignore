@@ -1,0 +1,9 @@
+.venv
+tests
+data/runtime
+.claude
+.pytest_cache
+__pycache__
+deploy
+Dockerfile
+docker-compose.yml

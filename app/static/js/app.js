@@ -119,6 +119,11 @@ function parsePastedOdds(text) {
   return (String(text).match(/\d{1,3}[.,]\d{1,3}/g) || []).map((x) => parseFloat(x.replace(",", "."))).filter((v) => v >= 1.01 && v <= 1000);
 }
 
+const PSTATE = { ok: ["green", "s_connected"], error: ["red", "s_error"], plan_limited: ["orange", "st_plan_limited"],
+  exhausted: ["red", "r_exhausted"], pending: ["blue", "s_key_saved"], not_configured: ["", "s_not_conf"] };
+const providerState = (p) => chip(PSTATE[p.state] ? PSTATE[p.state][0] : "", t(PSTATE[p.state] ? PSTATE[p.state][1] : "s_not_conf"));
+const providerHint = (p) => (p.hint ? `<div class="hint">${t(`hint_${p.hint}`)}</div>` : "");
+
 // --------------------------------------------------------------- builder storage
 const builder = {
   legs() { return store.get("bf_builder", []); },
@@ -133,7 +138,7 @@ const builder = {
 // ------------------------------------------------------------- top / chrome
 function applyLanguage() {
   document.documentElement.lang = state.lang;
-  $$(".tabbar a").forEach((a) => { const sp = a.querySelector("span"); if (sp) sp.textContent = t(`nav_${a.dataset.tab}`); });
+  $$(".topnav a").forEach((a) => { const sp = a.querySelector("span"); if (sp) sp.textContent = t(`nav_${a.dataset.tab}`); });
   $("#langBtn").textContent = state.lang === "da" ? "EN" : "DA";
   $("#langBtn").title = t("language");
 }
@@ -150,17 +155,15 @@ function renderTop() {
   const erroring = apis.filter((p) => p.last_error && (!p.last_ok || p.last_error_at > p.last_ok));
   const methods = (s.last_refresh && s.last_refresh.odds_methods) || [];
   let html = "";
-  if (s.demo_mode) {
-    pill.textContent = t("pill_demo"); pill.className = "pill demo";
-    html = `<div class="banner demo"><div class="grow">${t("banner_demo")}</div></div>`;
-  } else if (methods.length === 1 && methods[0] === "scraping") {
+  if (s.storage && !s.storage.persistent) html += `<div class="banner err"><div class="grow">${t("storage_warn")}</div></div>`;
+  if (methods.length === 1 && methods[0] === "scraping") {
     pill.textContent = t("pill_scraping"); pill.className = "pill orange";
   } else if (!apis.length) {
     pill.textContent = t("pill_manual"); pill.className = "pill warn";
-    html = `<div class="banner warn"><div class="grow">${t("banner_none")}</div></div>`;
+    if ((location.hash || "#home") !== "#home") html += `<div class="banner warn"><div class="grow">${t("banner_none")}</div></div>`;
   } else if (erroring.length) {
     pill.textContent = t("pill_error"); pill.className = "pill warn";
-    html = `<div class="banner err"><div class="grow"><b>${esc(erroring[0].label)}:</b> ${esc(erroring[0].last_error)}</div></div>`;
+    html += `<div class="banner err"><div class="grow"><b>${esc(erroring[0].label)}:</b> ${esc(erroring[0].last_error)}</div></div>`;
   } else {
     pill.textContent = t("pill_live", { n: apis.length }); pill.className = "pill ok";
   }
@@ -171,6 +174,7 @@ async function doRefresh() {
   const btn = $("#refreshBtn");
   if (btn.classList.contains("spin")) return;
   btn.classList.add("spin");
+  toast(t("refreshing"), 60000);
   try {
     const r = await api("/api/refresh", { method: "POST" });
     if (r.status === "busy") toast(t("refreshing_busy"));
@@ -209,10 +213,12 @@ function briefCard(b) {
 function renderHome(d) {
   const c = d.counts, st = d.status;
   const methods = (st.last_refresh && st.last_refresh.odds_methods) || [];
-  const method = st.demo_mode ? t("u_m_demo") : methods.includes("scraping") && !methods.includes("api") ? t("u_m_scraping") : methods.length ? t("u_m_api") : t("u_m_manual");
+  const method = methods.includes("scraping") && !methods.includes("api") ? t("u_m_scraping") : methods.length ? t("u_m_api") : t("u_m_manual");
   const tile = (k, v, href, cls = "") => `<a class="tile" href="${href}"><div class="k">${esc(k)}</div><div class="v ${cls}">${v}</div></a>`;
   const tr = d.tracker;
-  return head(t("dash_title"), esc(t("dash_sub"))) + `
+  const setup = st.any_live_source ? "" : `<div class="card setup"><b>${esc(t("setup_title"))}</b><div class="small muted">${esc(t("setup_sub"))}</div>
+    <ol class="small"><li>${t("setup_1")}</li><li>${t("setup_2")}</li><li>${t("setup_3")}</li><li>${t("setup_4")}</li></ol></div>`;
+  return head(t("dash_title"), esc(t("dash_sub"))) + setup + `
     <div class="card status-strip"><div class="row wrap">
       <span class="small muted">${esc(t("method_now"))}:</span> <b>${esc(method)}</b>
       <span class="small muted">· ${esc(t("odds_updated", { t: agoIso(d.odds_updated_at) }))}</span>
@@ -804,6 +810,7 @@ async function viewUsage(token) {
 
 function tokenBar(tk, method) {
   if (!tk) return `<span class="small muted">${esc(t(method === "scraping" ? "u_no_tokens" : "u_no_data"))}</span>`;
+  if (tk.note) return `<span class="small muted">${esc(t(`tk_${tk.note}`))}</span>`;
   if (tk.remaining_by_sport) return Object.entries(tk.remaining_by_sport).map(([s, r]) => `<div class="small">${esc(t("u_by_sport", { s: sportLabel(s), r }))}</div>`).join("") + `<div class="tiny faint">${esc(t("u_exact"))}</div>`;
   if (tk.limit == null) return `<span class="small muted">–</span>`;
   const used = tk.used || 0, limit = tk.limit, remaining = tk.remaining ?? Math.max(0, limit - used);
@@ -815,13 +822,13 @@ function tokenBar(tk, method) {
 
 function renderUsage(u, plan, st) {
   const methods = u.last_refresh.odds_methods || [];
-  const now = st.demo_mode ? t("u_m_demo") : methods.includes("api") ? t("u_m_api") : methods.includes("scraping") ? t("u_m_scraping") : t("u_m_manual");
+  const now = methods.includes("api") ? t("u_m_api") : methods.includes("scraping") ? t("u_m_scraping") : t("u_m_manual");
   const nowCls = methods.includes("scraping") && !methods.includes("api") ? "orange" : methods.includes("api") ? "green" : "amber";
   const mchip = (m) => chip(m === "scraping" ? "orange" : "blue", m === "scraping" ? t("u_m_scraping") : t("u_m_api"));
   const chain = (u.last_refresh.chain || []).map((c) => `<div class="list-row"><span><b>${esc(c.provider)}</b> ${mchip(c.method)}</span>
       <span class="small">${c.ran ? chip("green", t("u_ran")) : chip("", t("u_skipped"))} <span class="muted">${esc(t(`r_${c.reason}`))}${c.ran && c.quotes != null ? ` · ${c.quotes}` : ""}</span></span></div>`).join("");
   const rows = u.providers.map((p) => `<div class="card"><div class="spread"><b>${esc(p.label)}</b><span class="row">${mchip(p.method)}
-      ${p.configured ? (p.exhausted ? chip("red", t("r_exhausted")) : chip("green", t("s_connected"))) : chip("", t("s_not_conf"))}</span></div>
+      ${providerState(p)}</span></div>${providerHint(p)}
     <div style="margin-top:8px">${tokenBar(p.tokens, p.method)}</div>
     <dl class="kv" style="margin-top:8px"><dt>${esc(t("u_today"))}</dt><dd>${p.requests_today}</dd><dt>${esc(t("u_month"))}</dt><dd>${p.requests_month}</dd>
       <dt>${esc(t("u_last"))}</dt><dd>${agoIso(p.last_request_at)}</dd>${p.last_error ? `<dt>${esc(t("s_last_error"))}</dt><dd class="err-text">${esc(p.last_error)}</dd>` : ""}</dl>
@@ -852,16 +859,14 @@ async function viewSources(token) {
 
 function providerCard(p, settings) {
   const keyName = { the_odds_api: "odds_api_key", api_sports: "api_sports_key", odds_api_io: "odds_api_io_key", oddspapi: "oddspapi_key" }[p.provider];
-  let stc = chip("amber", t("s_not_conf"));
-  if (p.configured && p.last_error && (!p.last_ok || p.last_error_at > p.last_ok)) stc = chip("red", t("s_error"));
-  else if (p.configured && p.last_ok) stc = chip("green", t("s_connected"));
-  else if (p.configured) stc = chip("blue", t("s_key_saved"));
+  let stc = providerState(p);
   let keyBox = "";
   if (keyName) {
     const sk = settings[keyName];
     keyBox = sk.source === "environment" ? `<div class="small muted" style="margin-top:10px">${esc(t("s_env", { h: sk.hint }))}</div>` : `
       <form data-submit="saveKey" data-key="${keyName}" class="row" style="margin-top:10px"><input class="input" type="password" name="key" autocomplete="off" placeholder="${esc(sk.configured ? t("s_saved_hint", { h: sk.hint }) : t("s_paste"))}">
       <button class="btn small" type="submit">${esc(t("save"))}</button>${sk.configured ? `<button class="btn danger small" type="button" data-action="clearKey" data-key="${keyName}">${esc(t("remove"))}</button>` : ""}</form>`;
+    if (sk.configured) keyBox += `<button class="btn ghost small" style="margin-top:8px" type="button" data-action="testKey" data-p="${p.provider}">${esc(t("s_test"))}</button>`;
   }
   let extra = "";
   if (p.provider === "odds_api_io") extra = listSetting("odds_api_io_bookmakers", settings.odds_api_io_bookmakers, t("s_bookmakers_list"));
@@ -873,7 +878,7 @@ function providerCard(p, settings) {
       <div class="field" style="margin-top:12px"><label class="f">${esc(t("s_kambi_market"))}</label><input class="input" name="scraper_kambi_market" value="${esc(settings.scraper_kambi_market)}"></div></div>
       <button class="btn ghost small" type="submit" style="margin-top:8px">${esc(t("save"))}</button></form>`;
   }
-  return `<div class="card"><div class="spread"><b>${esc(p.label)}</b>${stc}</div><div class="small muted" style="margin-top:4px">${t(`p_${p.provider}`)}</div>
+  return `<div class="card"><div class="spread"><b>${esc(p.label)}</b>${stc}</div>${providerHint(p)}<div class="small muted" style="margin-top:4px">${t(`p_${p.provider}`)}</div>
     <dl class="kv" style="margin-top:10px"><dt>${esc(t("s_last_ok"))}</dt><dd>${agoIso(p.last_ok)}</dd><dt>${esc(t("s_requests"))}</dt><dd>${p.requests_today}</dd>
       ${p.last_error ? `<dt>${esc(t("s_last_error"))}</dt><dd class="err-text">${esc(p.last_error)}</dd>` : ""}</dl>${keyBox}${extra}</div>`;
 }
@@ -908,7 +913,6 @@ function renderSources(status, settings, books, comps) {
   return head(t("s_title"), esc(t("s_sub"))) + `
   <div class="section-title">${esc(t("s_providers"))}</div>${status.providers.map((p) => providerCard(p, settings)).join("")}
   <div class="card"><div class="spread"><b>${esc(t("s_manual"))}</b>${chip("green", t("s_always"))}</div><div class="small muted" style="margin-top:4px">${t("s_manual_d")}</div></div>
-  <div class="card"><div class="spread"><div><b>${esc(t("s_demo"))}</b><div class="small muted">${esc(t("s_demo_d"))}</div></div><label class="switch"><input type="checkbox" data-change="demoMode" ${settings.demo_mode ? "checked" : ""}></label></div></div>
   <div class="section-title">${esc(t("s_odds_opts"))}</div>
   <form class="card" data-submit="saveOddsApi"><div class="small muted">${t("s_cost", { c: plan.credits_per_refresh })} <a href="#usage">${esc(t("u_planner"))} ›</a></div>
     <div class="row wrap" style="margin-top:10px"><span class="small" style="width:70px">${esc(t("s_regions"))}</span>${["eu", "uk", "se", "fr"].map((r) => `<label class="switch small"><input type="checkbox" name="odds_api_regions" value="${r}" ${settings.odds_api_regions.includes(r) ? "checked" : ""}><span>${r.toUpperCase()}</span></label>`).join(" ")}</div>
@@ -989,6 +993,15 @@ const actions = {
     } catch (err) { toast(err.message); }
   },
   clearKey: async (el) => { if (!confirm(t("s_remove_key"))) return; try { await api("/api/settings", { method: "PUT", body: { [el.dataset.key]: "" } }); toast(t("s_key_removed")); await loadStatus(); route(); } catch (err) { toast(err.message); } },
+  testKey: async (el) => {
+    el.disabled = true;
+    try {
+      const r = await api(`/api/providers/${el.dataset.p}/test`, { method: "POST" });
+      const extra = r.info && r.info.plan ? ` (plan: ${r.info.plan})` : r.info && r.info.remaining ? ` (${r.info.remaining} credits left)` : "";
+      toast(t(`test_${r.code}`) + extra + (r.detail ? ` – ${r.detail}` : ""), 7000);
+    } catch (err) { toast(err.message, 5000); }
+    el.disabled = false;
+  },
   notifyTest: async () => { try { const r = await api("/api/notify/test", { method: "POST" }); toast(r.results.join(" · "), 5000); } catch (err) { toast(err.message, 5000); } },
 };
 
@@ -1004,10 +1017,6 @@ const changes = {
   },
   toggleComp: async (el) => {
     try { await api(`/api/competitions/${encodeURIComponent(el.value)}`, { method: "PUT", body: { enabled: el.checked } }); state.competitions = {}; toast(t(el.checked ? "s_comp_on" : "s_comp_off")); }
-    catch (err) { toast(err.message); el.checked = !el.checked; }
-  },
-  demoMode: async (el) => {
-    try { await api("/api/settings", { method: "PUT", body: { demo_mode: el.checked } }); toast(t(el.checked ? "s_demo_on" : "s_demo_off")); state.add.fixture = null; state.add.result = null; await loadStatus(); route(); }
     catch (err) { toast(err.message); el.checked = !el.checked; }
   },
 };
@@ -1084,7 +1093,7 @@ function route() {
   const [tab, ...rest] = hash.split("/");
   const token = ++state.routeToken;
   const nav = tab === "match" ? "scanner" : MORE_TABS.includes(tab) ? "more" : tab;
-  $$(".tabbar a").forEach((a) => a.classList.toggle("on", a.dataset.tab === nav));
+  $$(".topnav a").forEach((a) => a.classList.toggle("on", a.dataset.tab === nav));
   const views = { home: viewHome, scanner: viewScanner, picks: viewPicks, add: viewAdd, more: viewMore, agents: viewAgents,
     arbitrage: viewArbitrage, builder: viewBuilder, tracker: viewTracker, usage: viewUsage, sources: viewSources };
   if (tab === "match" && rest.length) viewMatch(token, decodeURIComponent(rest.join("/")));
@@ -1097,7 +1106,11 @@ window.addEventListener("hashchange", route);
   applyLanguage();
   try { state.catalog = await api("/api/catalog"); } catch (_) { state.catalog = { categories: {}, sports: {} }; }
   await loadStatus();
-  if (state.status && state.status.language && store.get("bf_lang", null) === null) { state.lang = state.status.language; applyLanguage(); }
+  if (state.status && state.status.language && state.status.language !== state.lang) {
+    // server-written texts (agents, coupons) must match the language shown in this browser
+    if (store.get("bf_lang", null) === null) { state.lang = state.status.language; applyLanguage(); }
+    else { try { await api("/api/settings", { method: "PUT", body: { language: state.lang } }); } catch (_) { /* read-only */ } }
+  }
   route();
   if ("serviceWorker" in navigator) navigator.serviceWorker.register("/sw.js").catch(() => {});
 })();
