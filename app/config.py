@@ -15,7 +15,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from app.core.odds_math import DEVIG_METHODS
 from app.storage.json_store import JsonStore
 
-APP_VERSION = "1.3.0"
+APP_VERSION = "1.3.1"
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 RISK_LEVELS = ("low", "medium", "high", "very_high")
@@ -168,8 +168,26 @@ class SettingsService:
         data = self.store.read(self.FILE, {})
         return data if isinstance(data, dict) else {}
 
+    @staticmethod
+    def env_defaults() -> dict:
+        """Any setting can be preset with an environment variable BETFINDER_<NAME>,
+        e.g. BETFINDER_SCRAPER_MODE=always or BETFINDER_MY_BOOKMAKERS=danske_spil,nordicbet.
+        Values changed later in the app still take priority."""
+        out = {}
+        for key, (_default, spec) in _SPEC.items():
+            raw = os.environ.get(f"BETFINDER_{key.upper()}")
+            if raw is None or spec.get("secret"):
+                continue
+            value = [v.strip() for v in raw.split(",") if v.strip()] if spec["type"] is list else raw
+            try:
+                out[key] = _coerce(key, value)
+            except SettingsError:
+                pass
+        return out
+
     def get(self) -> dict:
         merged = dict(DEFAULT_SETTINGS)
+        merged.update(self.env_defaults())
         for key, value in self._stored().items():
             if key in _SPEC:
                 try:

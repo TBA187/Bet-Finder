@@ -129,3 +129,54 @@ def test_file_store_migrates_single_odds_file(tmp_path):
     s.write("odds", {"fx-9": {"k": {"x": 1}}})
     Repository(s)
     assert not s.exists("odds") and s.read("odds/fx-9", {}) == {"k": {"x": 1}}
+
+
+def test_redis_url_store_and_selection(monkeypatch, tmp_path):
+    """Standard Redis (REDIS_URL / STORAGE_URL, e.g. Redis Cloud) works like Upstash."""
+    from app.storage import json_store
+    from app.storage.json_store import RedisURLStore, make_store
+
+    class FakeRedis:
+        def __init__(self):
+            self.db = {}
+
+        def execute_command(self, *args):
+            op = args[0].upper()
+            if op == "SET":
+                self.db[args[1]] = args[2]
+                return True
+            if op == "GET":
+                return self.db.get(args[1])
+            if op == "DEL":
+                return sum(1 for k in args[1:] if self.db.pop(k, None) is not None)
+            if op == "EXISTS":
+                return int(args[1] in self.db)
+            if op == "SCAN":
+                return (0, [k for k in self.db if k.startswith(args[3].rstrip("*"))])
+            raise AssertionError(op)
+
+    fake = FakeRedis()
+    import redis
+    monkeypatch.setattr(redis.Redis, "from_url", classmethod(lambda cls, url, **kw: fake))
+    for var in ("UPSTASH_REDIS_REST_URL", "KV_REST_API_URL", "REDIS_URL", "KV_URL", "VERCEL"):
+        monkeypatch.delenv(var, raising=False)
+    monkeypatch.setenv("STORAGE_URL", "rediss://default:pw@example.redis.cloud:12345")
+    store = make_store(tmp_path)
+    assert isinstance(store, RedisURLStore)
+    store.write("settings", {"a": 1})
+    store._cache.clear()
+    assert store.read("settings", {}) == {"a": 1} and store.list("sett") == ["settings"]
+    monkeypatch.delenv("STORAGE_URL")
+    assert isinstance(make_store(tmp_path), json_store.JsonStore)
+
+
+def test_settings_from_environment(monkeypatch, tmp_path):
+    from app.config import SettingsService
+    monkeypatch.setenv("BETFINDER_SCRAPER_MODE", "always")
+    monkeypatch.setenv("BETFINDER_MY_BOOKMAKERS", "danske_spil, nordicbet")
+    monkeypatch.setenv("BETFINDER_MIN_EV_PCT", "not-a-number")  # invalid -> ignored, default kept
+    svc = SettingsService(JsonStore(tmp_path))
+    s = svc.get()
+    assert s["scraper_mode"] == "always" and s["my_bookmakers"] == ["danske_spil", "nordicbet"] and s["min_ev_pct"] == 3.0
+    svc.update({"scraper_mode": "off"})  # a choice made in the app wins
+    assert svc.get()["scraper_mode"] == "off"

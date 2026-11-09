@@ -11,7 +11,8 @@ Two interchangeable backends with the same small interface
   are zlib-compressed JSON, reads are cached for a few seconds per instance,
   and cache entries can expire automatically (TTL).
 
-``make_store()`` picks Redis when Upstash/Vercel-KV credentials are present.
+``make_store()`` picks Upstash (REST) when its credentials are present, then
+any Redis server from REDIS_URL / STORAGE_URL (e.g. Redis Cloud), else files.
 """
 from __future__ import annotations
 
@@ -312,6 +313,32 @@ class RedisStore(BaseStore):
         return sorted(set(keys))
 
 
+class RedisURLStore(RedisStore):
+    """Any standard Redis server via a redis:// or rediss:// URL (e.g. Redis Cloud
+    from the Vercel Marketplace, which provides REDIS_URL)."""
+    kind = "redis"
+
+    def __init__(self, url: str, prefix: str = "betfinder:"):
+        BaseStore.__init__(self)
+        import redis  # only needed for this backend
+        self.prefix = prefix
+        self._cache = {}
+        self._r = redis.Redis.from_url(url, decode_responses=True, socket_timeout=10, socket_connect_timeout=10,
+                                       health_check_interval=30, retry_on_timeout=True)
+
+    def _cmd(self, *args) -> Any:
+        last = None
+        for attempt in range(3):
+            try:
+                return self._r.execute_command(*args)
+            except Exception as exc:  # redis.ConnectionError, TimeoutError, ...
+                if type(exc).__name__ == "ResponseError":
+                    raise StorageError(f"Redis error: {exc}") from None
+                last = type(exc).__name__
+                time.sleep(0.3 * (attempt + 1))
+        raise StorageError(f"Redis unavailable ({last})")
+
+
 def make_store(runtime_dir: Path) -> BaseStore:
     """Redis when Upstash / Vercel-KV credentials exist, else files.
 
@@ -319,8 +346,18 @@ def make_store(runtime_dir: Path) -> BaseStore:
     UI shows a warning in that case."""
     url = os.environ.get("UPSTASH_REDIS_REST_URL") or os.environ.get("KV_REST_API_URL")
     token = os.environ.get("UPSTASH_REDIS_REST_TOKEN") or os.environ.get("KV_REST_API_TOKEN")
+    if not (url and token):  # Vercel lets you choose a prefix, e.g. STORAGE_REST_API_URL
+        for name, value in os.environ.items():
+            if name.endswith("_REST_API_URL") and value.startswith("https://"):
+                tok = os.environ.get(name[: -len("_URL")] + "_TOKEN")
+                if tok:
+                    url, token = value, tok
+                    break
     if url and token:
         return RedisStore(url, token)
+    redis_url = os.environ.get("REDIS_URL") or os.environ.get("STORAGE_URL") or os.environ.get("KV_URL")
+    if redis_url and redis_url.startswith(("redis://", "rediss://")):
+        return RedisURLStore(redis_url)
     if os.environ.get("VERCEL"):
         return JsonStore(Path(tempfile.gettempdir()) / "betfinder-runtime", persistent=False)
     return JsonStore(runtime_dir)

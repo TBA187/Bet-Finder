@@ -311,3 +311,24 @@ def test_daily_window_after_midnight_covers_the_next_day(settings):
 def test_provider_key_test_endpoint_without_key(client):
     r = client.post("/api/providers/the_odds_api/test").json()
     assert r == {"ok": False, "code": "no_key"}
+
+
+def test_changing_a_key_clears_old_errors(client):
+    c = client.app.state.container
+    client.put("/api/settings", json={"odds_api_io_key": "wrong-key-123456"})
+    c.repo.update_provider_status("odds_api_io", last_error="odds_api_io: API key rejected (HTTP 401)",
+                                  last_error_at=utcnow().isoformat())
+    row = next(p for p in client.get("/api/usage").json()["providers"] if p["provider"] == "odds_api_io")
+    assert row["state"] == "error" and row["hint"] == "key_rejected"
+    client.put("/api/settings", json={"odds_api_io_key": ""})  # key removed
+    row = next(p for p in client.get("/api/usage").json()["providers"] if p["provider"] == "odds_api_io")
+    assert row["state"] == "not_configured" and row["hint"] is None and row["last_error"] is None
+
+
+def test_storage_detects_custom_vercel_prefix(monkeypatch, tmp_path):
+    from app.storage.json_store import RedisStore, make_store
+    for var in ("UPSTASH_REDIS_REST_URL", "KV_REST_API_URL", "UPSTASH_REDIS_REST_TOKEN", "KV_REST_API_TOKEN"):
+        monkeypatch.delenv(var, raising=False)
+    monkeypatch.setenv("STORAGE_REST_API_URL", "https://eu1-fake.upstash.io")
+    monkeypatch.setenv("STORAGE_REST_API_TOKEN", "tok")
+    assert isinstance(make_store(tmp_path), RedisStore)

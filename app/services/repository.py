@@ -293,6 +293,16 @@ class Repository:
             entry.update(fields)
             entry["updated_at"] = utcnow().isoformat()
 
+    def reset_provider_status(self, provider: str) -> None:
+        """Forget errors/limits of a provider (after its key was changed or removed).
+        Request counters are kept."""
+        with self.store.edit("provider_status", {}) as data:
+            for name, entry in data.items():
+                if name == provider or name.startswith(provider + "_"):
+                    for field in ("last_error", "last_error_at", "plan_limited", "exhausted", "remaining",
+                                  "used", "remaining_by_sport", "last_ok"):
+                        entry.pop(field, None)
+
     def count_provider_request(self, provider: str, n: int = 1) -> int:
         today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
         with self.store.edit("provider_status", {}) as data:

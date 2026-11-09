@@ -158,6 +158,8 @@ def usage(provider_status: dict, settings: dict, providers: list, secret_source,
         else:
             state = "pending"
         hint = None
+        if not p.configured():
+            err = ""  # errors of a removed key are history
         if "rejected" in err:
             hint = "key_rejected"
         elif "Free plans do not have access" in err or plan_limited:
@@ -172,7 +174,7 @@ def usage(provider_status: dict, settings: dict, providers: list, secret_source,
             "requests_today": st.get("requests_by_day", {}).get(today, 0),
             "requests_month": st.get("requests_by_month", {}).get(month, 0),
             "last_request_at": st.get("last_request_at"), "last_ok": st.get("last_ok"),
-            "last_error": st.get("last_error"), "last_error_at": st.get("last_error_at"),
+            "last_error": err or None, "last_error_at": st.get("last_error_at") if err else None,
             "exhausted": bool(st.get("exhausted")), "tokens": tokens, "state": state, "hint": hint,
             "blocked_hosts": {h: {"until": u, "reason": (st.get("block_reasons") or {}).get(h)}
                               for h, u in (st.get("blocked") or {}).items() if u > now.isoformat()},

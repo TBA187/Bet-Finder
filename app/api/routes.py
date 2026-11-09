@@ -629,7 +629,15 @@ def build_router(c) -> APIRouter:  # c: Container
 
     @r.put("/settings")
     def put_settings(patch: dict):
-        return c.settings.update(patch)
+        before = settings()
+        result = c.settings.update(patch)
+        after = settings()
+        key_owner = {"odds_api_key": "the_odds_api", "api_sports_key": "api_sports", "odds_api_io_key": "odds_api_io",
+                     "oddspapi_key": "oddspapi"}
+        for key, provider in key_owner.items():
+            if before.get(key) != after.get(key):  # new or removed key: old errors no longer apply
+                c.repo.reset_provider_status(provider)
+        return result
 
     @r.post("/notify/test")
     async def notify_test():
