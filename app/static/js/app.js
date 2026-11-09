@@ -100,7 +100,15 @@ async function api(path, opts = {}) {
 }
 const skeleton = (n = 3) => Array.from({ length: n }, () => `<div class="skeleton"></div>`).join("");
 const errorBox = (err) => `<div class="banner err"><div class="grow"><b>${esc(t("error_title"))}</b> ${esc(err.message || err)}</div></div>`;
-const head = (title, sub) => `<h1 class="page-title">${esc(title)}</h1>${sub ? `<div class="page-sub">${sub}</div>` : ""}`;
+const head = (title, sub) => `<div class="page-head"><h1 class="page-title">${esc(title)}</h1>${pillHtml()}</div>${sub ? `<div class="page-sub">${sub}</div>` : ""}`;
+
+/** The data-source badge sits on the right of every page title. */
+function pillHtml() {
+  const p = state.pill;
+  if (!p || !state.user) return "";
+  return `<button type="button" class="pill src-pill ${p.cls}" data-action="sourcePill" title="${esc(p.full)}" aria-label="${esc(p.full)}"><i class="pill-dot"></i>`
+    + `<span class="p-full">${esc(p.full)}</span><span class="p-short">${esc(p.short)}</span><span class="p-tiny">${esc(p.tiny)}</span></button>`;
+}
 const backBtn = () => `<button class="back" data-action="back">${esc(t("back"))}</button>`;
 
 function selLabel(market, sel, home, away, line) {
@@ -137,6 +145,11 @@ const builder = {
 };
 
 // ------------------------------------------------------------- top / chrome
+/** Phones: the navigation bar can sit at the top (default) or the bottom; remembered on this device. */
+function applyNavPos() {
+  document.body.classList.toggle("nav-bottom", store.get("bf_nav_pos", "top") === "bottom");
+  if (typeof trackTopbar === "function" && window.__fitTopbar) window.__fitTopbar();
+}
 function applyLanguage() {
   document.documentElement.lang = state.lang;
   $$(".topnav a").forEach((a) => { const sp = a.querySelector("span"); if (sp) sp.textContent = t(`nav_${a.dataset.tab}`); });
@@ -178,33 +191,32 @@ async function loadStatus() {
   renderTop();
 }
 
-function setPill(pill, cls, full, short) {
-  pill.className = `pill ${cls}`;
-  pill.innerHTML = `<i class="pill-dot"></i><span class="pill-full">${esc(full)}</span><span class="pill-short">${esc(short || full)}</span>`;
-  pill.title = full; pill.setAttribute("aria-label", full);
+function setPill(kind, cls, full, short, tiny) {
+  state.pill = { kind, cls, full, short: short || full, tiny: tiny || short || full };
+  $$(".src-pill").forEach((el) => { el.outerHTML = pillHtml(); });
 }
 
 function renderTop() {
-  const s = state.status, pill = $("#sourcePill"), banner = $("#banner");
+  const s = state.status, banner = $("#banner");
   if (!state.user) { banner.innerHTML = ""; return; }
   const pw = passwordWarning(state.user);
-  if (!s) { setPill(pill, "warn", t("offline")); banner.innerHTML = pw; return; }
+  if (!s) { setPill("offline", "warn", t("offline")); banner.innerHTML = pw; return; }
   const apis = s.providers.filter((p) => p.configured && p.method === "api");
   const erroring = can("usage") ? apis.filter((p) => p.last_error && (!p.last_ok || p.last_error_at > p.last_ok)) : [];
   const methods = (s.last_refresh && s.last_refresh.odds_methods) || [];
   let html = pw;
   if (s.storage && !s.storage.persistent && can("admin")) html += `<div class="banner err"><div class="grow">${t("storage_warn")}</div></div>`;
   if (methods.length === 1 && methods[0] === "scraping") {
-    setPill(pill, "orange", t("pill_scraping"));
+    setPill("scraping", "orange", t("pill_scraping"));
   } else if (!apis.length) {
-    setPill(pill, "warn", t("pill_manual"));
+    setPill("manual", "warn", t("pill_manual"));
     if ((location.hash || "#home") !== "#home" && can("admin")) html += `<div class="banner warn"><div class="grow">${t("banner_none")}</div></div>`;
   } else if (erroring.length) {
-    setPill(pill, "warn", t("pill_error"));
+    setPill("error", "warn", t("pill_error"));
     html += `<div class="banner err"><div class="grow"><b>${esc(erroring[0].label)}:</b> ${esc(erroring[0].last_error)}</div></div>`;
   } else {
-    const full = t("pill_live", { n: apis.length });
-    setPill(pill, "ok", full, `${full.split(" · ")[0]} · ${apis.length}`);
+    const n = apis.length, live = t("pill_live_word");
+    setPill("live", "ok", t(n === 1 ? "pill_live_1" : "pill_live_n", { n }), `${live} · ${n}`, live);
   }
   banner.innerHTML = html;
 }
@@ -537,6 +549,7 @@ async function viewPicks(token) {
   try {
     const d = await api(`/api/daily-picks${picksQuery()}`);
     if (token !== state.routeToken) return;
+    state.picksSingles = (d.singles || []).length; renderSidebar();
     view.innerHTML = renderPicks(d);
   } catch (err) { view.innerHTML += errorBox(err); }
 }
@@ -757,7 +770,10 @@ function viewMore() {
     (can("usage") ? item("#usage", "more_usage", "more_usage_d", "📊") : "") +
     (can("admin") ? item("#sources", "more_sources", "more_sources_d", "⚙") + item("#users", "more_users", "more_users_d", "👥", pending) : "") +
     item("#account", "more_account", "more_account_d", "👤") +
-    `<div class="card spread" style="margin-top:10px"><b>${esc(t("language"))}</b><div class="seg"><button data-action="setLang" data-v="en" class="${state.lang === "en" ? "on" : ""}">${flag("en")} English</button><button data-action="setLang" data-v="da" class="${state.lang === "da" ? "on" : ""}">${flag("da")} Dansk</button></div></div>
+    `<div class="card mobile-only navpos" style="margin-top:10px"><b class="navpos-title">${esc(t("navpos_title"))}</b>
+      <div class="navpos-row"><div class="small muted navpos-desc">${esc(t("navpos_desc"))}</div>
+      <div class="seg">${["top", "bottom"].map((v) => `<button type="button" data-action="navPos" data-v="${v}" class="${store.get("bf_nav_pos", "top") === v ? "on" : ""}">${esc(t(`navpos_${v}`))}</button>`).join("")}</div></div></div>
+    <div class="card spread" style="margin-top:10px"><b>${esc(t("language"))}</b><div class="seg"><button data-action="setLang" data-v="en" class="${state.lang === "en" ? "on" : ""}">${flag("en")} English</button><button data-action="setLang" data-v="da" class="${state.lang === "da" ? "on" : ""}">${flag("da")} Dansk</button></div></div>
     <button class="btn ghost block" type="button" data-action="signOut" style="margin-top:12px">${esc(t("ac_sign_out"))} (${esc(state.user.username)})</button>`;
 }
 
@@ -836,6 +852,7 @@ async function viewTracker(token) {
   } catch (err) { view.innerHTML += errorBox(err); }
 }
 
+const trackerState = { tab: "summary" };
 function renderTracker(d) {
   const s = d.summary;
   const tile = (k, v, cls = "") => `<div class="tile static"><div class="k">${esc(t(k))}</div><div class="v ${cls}">${v}</div></div>`;
@@ -851,11 +868,14 @@ function renderTracker(d) {
           : it.manual_result ? `<button class="btn ghost small" data-action="settle" data-id="${esc(it.id)}" data-v="pending">${esc(t("tr_reopen"))}</button>` : ""}
         <button class="btn danger small" data-action="delTracked" data-id="${esc(it.id)}">${esc(t("tr_delete"))}</button></div></div>`;
   }).join("");
-  return head(t("tr_title"), esc(t("tr_sub"))) + `<div class="tiles" id="sec-summary">
+  const tab = trackerState.tab;
+  const seg = ["summary", "history"].map((k) => `<button type="button" data-action="trackerTab" data-v="${k}" class="${tab === k ? "on" : ""}">${esc(t(k === "summary" ? "sm_summary" : "sm_history"))}</button>`).join("");
+  const summary = `<div class="tiles">
     ${tile("tr_tracked", s.tracked)}${tile("tr_settled", s.settled)}${tile("tr_hit", s.hit_rate_pct != null ? s.hit_rate_pct + "%" : "–")}${tile("tr_roi", s.roi_pct != null ? fmtEv(s.roi_pct) : "–", evClass(s.roi_pct))}
     ${tile("tr_avg_ev", fmtEv(s.avg_ev_pct), evClass(s.avg_ev_pct))}${tile("tr_avg_clv", fmtEv(s.avg_clv_pct), evClass(s.avg_clv_pct))}
-    ${tile("tr_beat", s.clv_beat_rate_pct != null ? s.clv_beat_rate_pct + "%" : "–")}${tile("tr_profit", s.profit, evClass(s.profit))}</div>
-    <div class="section-title" id="sec-history">${esc(t("tr_history"))}</div>${items || `<div class="empty"><div class="big">${esc(t("tr_empty"))}</div>${esc(t("tr_empty_sub"))}</div>`}`;
+    ${tile("tr_beat", s.clv_beat_rate_pct != null ? s.clv_beat_rate_pct + "%" : "–")}${tile("tr_profit", s.profit, evClass(s.profit))}</div>`;
+  const history = `${items || `<div class="empty"><div class="big">${esc(t("tr_empty"))}</div>${esc(t("tr_empty_sub"))}</div>`}`;
+  return head(t("tr_title"), esc(t("tr_sub"))) + `<div class="seg" style="margin-bottom:12px">${seg}</div>` + (tab === "history" ? history : summary);
 }
 
 // --------------------------------------------------------------------- usage
@@ -1015,6 +1035,15 @@ async function askStake() { const v = prompt(t("stake_prompt"), "1"); return v =
 
 const actions = {
   ...AUTH_ACTIONS,
+  sourcePill: () => {
+    if (can("usage")) { location.hash = "#usage"; return; }
+    const kind = (state.pill && state.pill.kind) || "offline";   // everyone else gets a short explanation
+    openModal(`<h2 id="modalTitle">${esc(t("pill_info_title"))}</h2><div class="small" style="margin-top:8px;line-height:1.5">${esc(t(`pill_info_${kind}`))}</div>
+      <div class="small muted" style="margin-top:8px;line-height:1.5">${esc(t("pill_info_more"))}</div>
+      <div class="row" style="margin-top:14px"><button class="btn ghost small" type="button" data-action="closeModal">${esc(t("close"))}</button></div>`);
+  },
+  navPos: (el) => { store.set("bf_nav_pos", el.dataset.v); applyNavPos(); route(); },
+  trackerTab: (el) => { trackerState.tab = el.dataset.v; route(); },
   openMatch: (el) => { location.hash = `#match/${encodeURIComponent(el.dataset.id)}`; },
   back: () => { if (history.length > 1) history.back(); else location.hash = "#home"; },
   setLang: (el) => setLanguage(el.dataset.v),
@@ -1149,7 +1178,6 @@ document.addEventListener("change", (e) => { const el = e.target.closest("[data-
 document.addEventListener("input", (e) => { const el = e.target.closest("[data-input]"); if (el && inputs[el.dataset.input]) inputs[el.dataset.input](el, e); });
 document.addEventListener("submit", (e) => { const f = e.target.closest("[data-submit]"); if (f && submits[f.dataset.submit]) { e.preventDefault(); submits[f.dataset.submit](f, e); } });
 $("#refreshBtn").addEventListener("click", doRefresh);
-$("#sourcePill").addEventListener("click", () => { if (can("usage")) location.hash = "#usage"; });
 $("#userBtn").addEventListener("click", () => { location.hash = can("admin") && state.user.pending_requests ? "#users" : "#account"; });
 
 
@@ -1189,6 +1217,10 @@ function route(fromHash = false) {
   }
   let section = rest[0] || "";
   if (fromHash && tab === "scanner" && section) { applyScannerFilter(section); section = ""; }
+  if (tab === "tracker" && ["summary", "history"].includes(section)) {
+    if (fromHash) trackerState.tab = section;
+    section = "";
+  }
   if (tab === "users" && USERS_TABS.includes(section)) {  // the tabs of that page live in the address
     if (fromHash) { usersState.tab = section; usersState.picked = true; }
     section = "";
@@ -1203,6 +1235,7 @@ function route(fromHash = false) {
 window.addEventListener("hashchange", () => route(true));
 
 (async function init() {
+  applyNavPos();
   trackTopbar();
   initPageChrome();
   applyLanguage();

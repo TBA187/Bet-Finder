@@ -23,6 +23,8 @@ const ICONS = {
   expand: svg('<path d="M9 6l6 6-6 6"/>', 18),
   logout: svg('<path d="M10 4H5v16h5"/><path d="M14 8l4 4-4 4M18 12H9"/>'),
   check: svg('<path d="M5 12.5l4.5 4.5L19 7.5"/>', 15),
+  foldUp: svg('<path d="M7 11l5-5 5 5M7 18l5-5 5 5"/>', 16),
+  foldDown: svg('<path d="M7 6l5 5 5-5M7 13l5 5 5-5"/>', 16),
   chevron: svg('<path d="M6 9l6 6 6-6"/>', 15),
 };
 const flag = (lang) => `<i class="flag flag-${lang}" aria-hidden="true"></i>`;
@@ -88,6 +90,8 @@ function sideState() {
   return side;
 }
 const SIDE_LIMIT = 5;
+const CLOSED_BY_DEFAULT = ["sources"];   // categories that start collapsed until the person opens them
+const isOpen = (id) => (CLOSED_BY_DEFAULT.includes(id) ? side.open[id] === true : side.open[id] !== false);
 const isNarrow = () => window.matchMedia("(max-width: 899px)").matches;
 
 function sideCollapsed() {
@@ -107,27 +111,26 @@ function menuModel() {
         subs: [["coupons", "sm_coupons"], ["value", "sm_value"], ["errors", "sm_errors"], ["drops", "sm_drops"], ["performance", "sm_performance"]] },
       { id: "scanner", href: "#scanner", icon: ICONS.scanner, label: "nav_scanner", filters: true,
         subs: [["all", "sm_all_matches"], ["valueonly", "sm_value_only"], ...catSubs] },
-      { id: "picks", href: "#picks", icon: ICONS.picks, label: "nav_picks", subs: [["coupons", "sm_picks_coupons"], ["singles", "sm_singles"], ["criteria", "sm_criteria"]] },
+      { id: "picks", href: "#picks", icon: ICONS.picks, label: "nav_picks", subs: [["coupons", "sm_picks_coupons"], ["singles", "sm_singles", () => state.picksSingles > 0], ["criteria", "sm_criteria"]] },
       { id: "add", href: "#add", icon: ICONS.add, label: "nav_add", perm: "manual" },
     ] },
     { title: "g_tools", items: [
       { id: "agents", href: "#agents", icon: ICONS.agents, label: "more_agents" },
       { id: "arbitrage", href: "#arbitrage", icon: ICONS.arbitrage, label: "more_arb" },
       { id: "builder", href: "#builder", icon: ICONS.builder, label: "more_builder" },
-      { id: "tracker", href: "#tracker", icon: ICONS.tracker, label: "more_tracker", subs: [["summary", "sm_summary"], ["history", "sm_history"]] },
-      { id: "usage", href: "#usage", icon: ICONS.usage, label: "more_usage", perm: "usage", hide: admin,
-        subs: [["chain", "sm_chain"], ["providers", "sm_providers"], ["planner", "sm_planner"]] },
-    ] },
-    { title: "g_account", items: [
-      { id: "account", href: "#account", icon: ICONS.account, label: "nav_my_account" },
-      { id: "logout", action: "signOut", icon: ICONS.logout, label: "nav_logout" },
+      { id: "tracker", href: "#tracker", icon: ICONS.tracker, label: "more_tracker" },
+      { id: "usage", href: "#usage", icon: ICONS.usage, label: "more_usage", perm: "usage", hide: admin },
     ] },
     { title: "g_admin", perm: "admin", items: [
       { id: "admin", href: "#admin", icon: ICONS.admin, label: "nav_admin_overview" },
       { id: "users", href: "#users", icon: ICONS.users, label: "nav_manage_accounts", badge: state.user && state.user.pending_requests },
       { id: "sources", href: "#sources", icon: ICONS.sources, label: "more_sources",
         subs: [["providers", "sm_api_keys"], ["oddsopts", "s_odds_opts"], ["notify", "s_notify"], ["books", "s_books"], ["leagues", "sm_leagues"], ["analysis", "sm_analysis"]] },
-      { id: "usage", href: "#usage", icon: ICONS.usage, label: "more_usage", subs: [["chain", "sm_chain"], ["providers", "sm_providers"], ["planner", "sm_planner"]] },
+      { id: "usage", href: "#usage", icon: ICONS.usage, label: "more_usage" },
+    ] },
+    { title: "g_account", items: [
+      { id: "account", href: "#account", icon: ICONS.account, label: "nav_my_account" },
+      { id: "logout", action: "signOut", icon: ICONS.logout, label: "nav_logout" },
     ] },
   ];
   return groups.filter((g) => !g.perm || can(g.perm))
@@ -157,8 +160,8 @@ function renderSidebar() {
   const groups = menuModel().map((g) => {
     const items = g.items.map((it) => {
       const isActive = act === it.id;
-      const subs = it.subs || [];
-      const open = subs.length && side.open[it.id] !== false;
+      const subs = (it.subs || []).filter((x) => !x[2] || x[2]());
+      const open = subs.length && isOpen(it.id);
       const all = side.more[it.id] || subs.length <= SIDE_LIMIT + 1;
       const shown = all ? subs : subs.slice(0, SIDE_LIMIT);
       const curSub = activeSubOf(it);
@@ -171,14 +174,18 @@ function renderSidebar() {
       const link = it.action
         ? `<button type="button" class="side-link" data-action="${it.action}" title="${esc(t(it.label))}">${inner}</button>`
         : `<a class="side-link" href="${it.href}" data-nav-tab="${it.id}" title="${esc(t(it.label))}"${isActive ? ' aria-current="page"' : ""}>${inner}</a>`;
-      return `<div class="side-item ${isActive ? "on" : ""}"><div class="side-row">${link}
+      return `<div class="side-item ${isActive ? "on" : ""} ${it.id === "logout" ? "logout" : ""}"><div class="side-row">${link}
           ${subs.length && !collapsed ? `<button type="button" class="side-caret ${open ? "open" : ""}" data-side-open="${it.id}" aria-expanded="${open ? "true" : "false"}" aria-label="${esc(t(open ? "sm_collapse" : "sm_expand"))}">${ICONS.chevron}</button>` : ""}
         </div>${collapsed ? "" : subHtml}</div>`;
     }).join("");
     return `<div class="side-group">${g.title ? `<div class="side-title">${esc(t(g.title))}</div>` : ""}${items}</div>`;
   }).join("");
-  el.innerHTML = `<button type="button" class="side-toggle" data-side-toggle aria-label="${esc(t(collapsed ? "sm_expand_menu" : "sm_collapse_menu"))}" title="${esc(t(collapsed ? "sm_expand_menu" : "sm_collapse_menu"))}">
-      ${collapsed ? ICONS.expand : ICONS.collapse}<span class="side-label">${esc(t("sm_collapse_menu"))}</span></button><nav aria-label="${esc(t("sm_menu"))}">${groups}</nav>`;
+  const withSubs = menuModel().flatMap((g) => g.items).filter((i) => (i.subs || []).length);
+  const anyOpen = withSubs.some((i) => isOpen(i.id));
+  const foldTip = t(anyOpen ? "sm_collapse_all" : "sm_expand_all");
+  const fold = collapsed ? "" : `<button type="button" class="side-fold" data-side-fold aria-label="${esc(foldTip)}" title="${esc(foldTip)}">${anyOpen ? ICONS.foldUp : ICONS.foldDown}</button>`;
+  el.innerHTML = `<div class="side-top"><button type="button" class="side-toggle" data-side-toggle aria-label="${esc(t(collapsed ? "sm_expand_menu" : "sm_collapse_menu"))}" title="${esc(t(collapsed ? "sm_expand_menu" : "sm_collapse_menu"))}">
+      ${collapsed ? ICONS.expand : ICONS.collapse}<span class="side-label">${esc(t("sm_collapse_menu"))}</span></button>${fold}</div><nav aria-label="${esc(t("sm_menu"))}">${groups}</nav>`;
 }
 
 function setSideCollapsed(v) {
@@ -191,7 +198,13 @@ document.addEventListener("click", (e) => {
   const tg = e.target.closest("[data-side-toggle]");
   if (tg) { setSideCollapsed(!sideCollapsed()); return; }
   const op = e.target.closest("[data-side-open]");
-  if (op) { const id = op.dataset.sideOpen; side.open[id] = side.open[id] === false; store.set("bf_side_open", side.open); renderSidebar(); return; }
+  if (op) { const id = op.dataset.sideOpen; side.open[id] = !isOpen(id); store.set("bf_side_open", side.open); renderSidebar(); return; }
+  if (e.target.closest("[data-side-fold]")) {
+    const ids = menuModel().flatMap((g) => g.items).filter((i) => (i.subs || []).length).map((i) => i.id);
+    const open = !ids.some((id) => isOpen(id));   // everything closed -> open all, otherwise close all
+    ids.forEach((id) => { side.open[id] = open; });
+    store.set("bf_side_open", side.open); renderSidebar(); return;
+  }
   const mo = e.target.closest("[data-side-more]");
   if (mo) { const id = mo.dataset.sideMore; side.more[id] = !side.more[id]; store.set("bf_side_more", side.more); renderSidebar(); return; }
   if (e.target.closest("[data-theme-toggle]")) { setTheme(currentTheme() === "dark" ? "light" : "dark"); return; }
@@ -210,12 +223,21 @@ document.addEventListener("click", (e) => {
 });
 document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeLangMenu(); });
 
-/** Keeps the side menu just below the top bar, whatever height the bar has. */
+/** Keeps the side menu just below the top bar. On phones only the navigation row sticks, so the bar
+ * is pulled up by the height of the logo row (negative top) and --topbar-h is what stays visible. */
 function trackTopbar() {
-  const bar = $(".topbar");
-  const set = () => document.documentElement.style.setProperty("--topbar-h", `${bar.offsetHeight}px`);
+  const bar = $(".topbar"), nav = $(".topnav");
+  const set = () => {
+    const phone = window.matchMedia("(max-width: 899px)").matches, bottom = document.body.classList.contains("nav-bottom");
+    let pull = 0;
+    if (phone && !bottom) pull = Math.max(0, nav.offsetTop - 6);
+    bar.style.top = `-${pull}px`;
+    document.documentElement.style.setProperty("--topbar-h", `${phone ? (bottom ? 0 : bar.offsetHeight - pull) : bar.offsetHeight}px`);
+    document.documentElement.style.setProperty("--navbar-h", `${nav.offsetHeight}px`);
+  };
+  window.__fitTopbar = set;
   set();
-  if (window.ResizeObserver) new ResizeObserver(set).observe(bar);
+  if (window.ResizeObserver) { new ResizeObserver(set).observe(bar); new ResizeObserver(set).observe(nav); }
   window.addEventListener("resize", set);
 }
 const topbarH = () => parseInt(getComputedStyle(document.documentElement).getPropertyValue("--topbar-h"), 10) || 70;
