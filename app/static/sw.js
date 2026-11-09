@@ -1,8 +1,8 @@
 /* BetFinder service worker: makes the app installable and gives an offline
  * fallback for the app shell.  API responses are never cached, so odds are
  * always live (or clearly unavailable). */
-const CACHE = "betfinder-shell-v3";
-const SHELL = ["/", "/static/css/style.css", "/static/js/app.js", "/static/js/i18n.js", "/static/icon.svg", "/static/manifest.json"];
+const CACHE = "betfinder-shell-v4";
+const SHELL = ["/", "/static/css/style.css", "/static/js/app.js", "/static/js/i18n.js", "/static/js/auth.js", "/static/icon.svg", "/static/manifest.json"];
 
 self.addEventListener("install", (e) => { e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting())); });
 self.addEventListener("activate", (e) => {

@@ -19,6 +19,7 @@ from app.i18n import lang_of, tr
 from app.providers.http import ProviderError
 from app.services import builder as bet_builder
 from app.services import insights, notify
+from app.services.auth import CURRENT_USER
 from app.services.repository import fixture_id_for
 
 MARKET = Literal["h2h", "h2h3", "dnb", "totals", "spreads", "btts"]
@@ -135,7 +136,17 @@ def build_router(c) -> APIRouter:  # c: Container
 
     # ------------------------------------------------------------ helpers
     def settings() -> dict:
-        return c.settings.get()
+        s = c.settings.get()
+        user = CURRENT_USER.get()
+        if user and user.get("language") in ("en", "da"):
+            s = {**s, "language": user["language"]}  # texts in the signed-in person's language
+        return s
+
+    def owner() -> dict:
+        """Whose bet tracker: every account has its own.  Super admins also see bets
+        tracked before accounts existed."""
+        user = CURRENT_USER.get() or {}
+        return {"owner": user.get("id"), "legacy": user.get("role") == "superadmin"}
 
     def lang() -> str:
         return lang_of(settings())
@@ -255,7 +266,7 @@ def build_router(c) -> APIRouter:  # c: Container
             "providers": usage["providers"], "manual_entry": True, "scraper_mode": s["scraper_mode"],
             "last_refresh": c.refresh.last(), "refresh_running": c.refresh.running,
             "fixtures": len(fixtures), "fixtures_with_odds": sum(1 for fx in fixtures if c.repo.quotes(fx.id)),
-            "registry_errors": c.registry.errors, "auth_required": bool(c.token),
+            "registry_errors": c.registry.errors,
             "any_live_source": any(p["configured"] and p["method"] == "api" for p in usage["providers"]),
             "notifications": notify.enabled(s),
         }
@@ -267,8 +278,8 @@ def build_router(c) -> APIRouter:  # c: Container
     @r.get("/cron/refresh")
     async def cron_refresh(request: Request):
         """For schedulers (Vercel Cron, GitHub Actions, cron-job.org).
-        Send header  Authorization: Bearer <CRON_SECRET>  (or the BETFINDER_TOKEN)."""
-        secret = os.environ.get("CRON_SECRET", "").strip() or c.token
+        Send header  Authorization: Bearer <CRON_SECRET>."""
+        secret = os.environ.get("CRON_SECRET", "").strip()
         if secret:
             sent = request.headers.get("authorization", "")
             if not hmac.compare_digest(sent, f"Bearer {secret}"):
@@ -313,10 +324,13 @@ def build_router(c) -> APIRouter:  # c: Container
                     info = {}
         except httpx.HTTPError as exc:
             return {"ok": False, "code": "network", "detail": type(exc).__name__}
+        now = utcnow().isoformat()
         if resp.status_code in (401, 403):
+            c.repo.update_provider_status(name, last_error=f"API key rejected (HTTP {resp.status_code})", last_error_at=now)
             return {"ok": False, "code": "rejected"}
         if resp.status_code >= 400:
             return {"ok": False, "code": "error", "detail": f"HTTP {resp.status_code}"}
+        c.repo.update_provider_status(name, last_ok=now)  # a working key counts as connected
         return {"ok": True, "code": "ok", "info": info}
 
     @r.get("/usage")
@@ -335,7 +349,7 @@ def build_router(c) -> APIRouter:  # c: Container
         now = utcnow()
         analyses = c.analyses(now, s)
         picks = c.daily_picks(now, s, analyses)
-        tracker = c.tracker.overview(s)["summary"]
+        tracker = c.tracker.overview(s, **owner())["summary"]
         return insights.dashboard(analyses, picks, tracker, status())
 
     @r.get("/agents")
@@ -507,7 +521,7 @@ def build_router(c) -> APIRouter:  # c: Container
     # ---------------------------------------------------------------- tracker
     @r.get("/tracker")
     def tracker():
-        return c.tracker.overview(settings())
+        return c.tracker.overview(settings(), **owner())
 
     @r.post("/tracker/selection")
     def track_selection(body: TrackSelection):
@@ -523,7 +537,8 @@ def build_router(c) -> APIRouter:  # c: Container
                "market_label": sel["market_label"], "selection": sel["selection"], "selection_label": sel["label"],
                "bookmaker": bookmaker, "odds": odds, "probability": p, "fair_odds": sel["fair_odds"],
                "ev_pct": round((p * odds - 1) * 100, 2) if p else None}
-        return c.tracker.track([leg], title=f"{fx.name}: {sel['label']}", stake=body.stake, source="manual", note=body.note)
+        return c.tracker.track([leg], title=f"{fx.name}: {sel['label']}", stake=body.stake, source="manual", note=body.note,
+                               owner=owner()["owner"])
 
     @r.post("/tracker/coupon")
     def track_coupon(body: TrackCoupon):
@@ -535,16 +550,16 @@ def build_router(c) -> APIRouter:  # c: Container
                                              "selection_label", "bookmaker", "odds", "probability", "fair_odds", "ev_pct")}
                         for leg in coupon["legs"]]
                 return c.tracker.track(legs, title=tr(lang(), "tracker_daily", day=day, title=coupon["title"]),
-                                       stake=body.stake, source="daily_picks")
+                                       stake=body.stake, source="daily_picks", owner=owner()["owner"])
         raise HTTPException(404, tr(lang(), "err_not_found"))
 
     @r.post("/tracker/{item_id}/settle")
     def settle(item_id: str, body: SettleIn):
-        return c.tracker.settle_manual(item_id, body.status)
+        return c.tracker.settle_manual(item_id, body.status, **owner())
 
     @r.delete("/tracker/{item_id}")
     def delete_tracked(item_id: str):
-        if not c.tracker.delete(item_id):
+        if not c.tracker.delete(item_id, **owner()):
             raise HTTPException(404, tr(lang(), "err_not_found"))
         return {"ok": True}
 

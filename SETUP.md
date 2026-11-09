@@ -71,10 +71,12 @@ Open your **BetFinder project → Settings → Environment Variables** and add:
 | `API_SPORTS_KEY` | (optional) API-Sports key |
 | `ODDS_API_IO_KEY` | (optional) odds-api.io key |
 | `TELEGRAM_BOT_TOKEN` | (optional) Telegram bot token |
-| `BETFINDER_TOKEN` | a long random password. Anyone opening the site must enter it once, which keeps your keys and settings private |
-| `CRON_SECRET` | another long random string, used by the scheduled refresh |
+| `CRON_SECRET` | a long random string, used by the scheduled refresh |
+| `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_FROM` | (optional) email settings, so BetFinder can email temporary passwords to new users. Without them you copy the password yourself |
 
-Generate random strings at e.g. <https://1password.com/password-generator>, or run `python -c "import secrets;print(secrets.token_urlsafe(32))"`.
+Generate a random string at e.g. <https://1password.com/password-generator>, or run `python -c "import secrets;print(secrets.token_urlsafe(32))"`.
+
+The site is protected by accounts (username + password), so there is no shared access token any more.
 
 Then go to **Deployments**, open the latest one and click **⋯ → Redeploy**, so the new variables take effect.
 
@@ -97,11 +99,12 @@ You can also paste keys on the website under *More → Sources*. With Upstash co
 
 ## 5. Done: check it
 
-1. Open your Vercel URL and enter your `BETFINDER_TOKEN` when asked.
-2. The dashboard's "Get started" box disappears once a key is configured.
-3. Press **⟳**. *More → Data usage* shows which source delivered odds (API or scraping) and how many tokens are left.
-4. On iPhone: Safari → Share → **Add to Home Screen**.
-5. Under *Sources*, tick **Mine** for the bookmakers where you have a betting account.
+1. Open your Vercel URL and sign in with **admin / admin**. Change the password straight away under *More → My account* (the red banner reminds you).
+2. Under *More → Users & requests* you approve account requests and create accounts (roles: Super admin, Editor, User).
+3. The dashboard's "Get started" box disappears once a key is configured.
+4. Press **⟳**. *More → Data usage* shows which source delivered odds (API or scraping) and how many tokens are left.
+5. On iPhone: Safari → Share → **Add to Home Screen**.
+6. Under *Sources*, tick **Mine** for the bookmakers where you have a betting account.
 
 ## Running on your own PC instead
 

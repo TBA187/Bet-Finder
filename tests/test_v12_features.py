@@ -60,7 +60,7 @@ def test_danish_texts(repo, analysis, settings):
 
 
 def test_danish_no_picks_message(client):
-    client.put("/api/settings", json={"language": "da"})
+    assert client.put("/api/account", json={"language": "da"}).status_code == 200  # language is per account
     assert client.get("/api/daily-picks").json()["message"] == "Ingen kvalificerede værdispil fundet i dag."
 
 

@@ -15,6 +15,7 @@ const store = {
 
 const state = {
   lang: store.get("bf_lang", "en"),
+  user: null,
   status: null,
   catalog: null,
   scanner: { category: "", sport: "", value_only: false, sort: "value", min_deviation: "" },
@@ -81,19 +82,19 @@ function toast(msg, ms = 2800) {
 
 async function api(path, opts = {}) {
   const headers = { "Content-Type": "application/json", ...(opts.headers || {}) };
-  const token = store.get("bf_token", null);
-  if (token) headers["X-BetFinder-Token"] = token;
-  const res = await fetch(path, { ...opts, headers, body: opts.body ? JSON.stringify(opts.body) : undefined });
-  if (res.status === 401) {
-    const tk = prompt("Access token:");
-    if (tk) { store.set("bf_token", tk.trim()); return api(path, opts); }
-  }
+  const { quiet, ...rest } = opts;
+  const res = await fetch(path, { ...rest, headers, credentials: "same-origin", body: opts.body ? JSON.stringify(opts.body) : undefined });
   let data = null;
   try { data = await res.json(); } catch (_) { /* empty */ }
   if (!res.ok) {
+    const code = data && data.code;
+    if (res.status === 401 && code === "auth_required" && !quiet && state.user) signedOut(t("au_session_expired"));
     let detail = data && data.detail;
     if (Array.isArray(detail)) detail = detail.map((d) => `${(d.loc || []).slice(-1)[0]}: ${d.msg}`).join("; ");
-    throw new Error(detail || `HTTP ${res.status}`);
+    const known = code && t(`ae_${code}`) !== `ae_${code}`;
+    const err = new Error(known ? t(`ae_${code}`) : detail || `HTTP ${res.status}`);
+    err.code = code; err.status = res.status;
+    throw err;
   }
   return data;
 }
@@ -120,7 +121,7 @@ function parsePastedOdds(text) {
 }
 
 const PSTATE = { ok: ["green", "s_connected"], error: ["red", "s_error"], plan_limited: ["orange", "st_plan_limited"],
-  exhausted: ["red", "r_exhausted"], pending: ["blue", "s_key_saved"], not_configured: ["", "s_not_conf"] };
+  exhausted: ["red", "r_exhausted"], pending: ["blue", "s_key_saved"], standby: ["blue", "s_standby"], not_configured: ["", "s_not_conf"] };
 const providerState = (p) => chip(PSTATE[p.state] ? PSTATE[p.state][0] : "", t(PSTATE[p.state] ? PSTATE[p.state][1] : "s_not_conf"));
 const providerHint = (p) => (p.hint ? `<div class="hint">${t(`hint_${p.hint}`)}</div>` : "");
 
@@ -141,26 +142,55 @@ function applyLanguage() {
   $$(".topnav a").forEach((a) => { const sp = a.querySelector("span"); if (sp) sp.textContent = t(`nav_${a.dataset.tab}`); });
   $("#langBtn").textContent = state.lang === "da" ? "EN" : "DA";
   $("#langBtn").title = t("language");
+  $("#userBtn").title = t("more_account");
+  $("#userBtn").setAttribute("aria-label", t("more_account"));
+}
+
+/** Show only what the signed-in account may use (the server checks it again). */
+function applyRole() {
+  const signed = !!state.user;
+  document.body.classList.toggle("signed-out", !signed);
+  $$(".topnav a").forEach((a) => { a.hidden = a.dataset.tab === "add" && !can("manual"); });
+  $("#refreshBtn").hidden = !can("refresh");
+  const ub = $("#userBtn");
+  if (signed) {
+    ub.textContent = initials(state.user);
+    const n = can("admin") ? state.user.pending_requests || 0 : 0;
+    ub.dataset.badge = n ? String(n) : "";
+  }
+}
+
+async function startApp() {
+  if (state.user && state.user.language && state.user.language !== state.lang) { state.lang = state.user.language; store.set("bf_lang", state.lang); }
+  applyLanguage(); applyRole();
+  if (!state.catalog || !Object.keys(state.catalog.sports || {}).length) {
+    try { state.catalog = await api("/api/catalog"); } catch (_) { state.catalog = { categories: {}, sports: {} }; }
+  }
+  await loadStatus();
+  route();
 }
 
 async function loadStatus() {
+  if (!state.user) return;
   try { state.status = await api("/api/status"); } catch (_) { state.status = null; }
   renderTop();
 }
 
 function renderTop() {
   const s = state.status, pill = $("#sourcePill"), banner = $("#banner");
-  if (!s) { pill.textContent = t("offline"); pill.className = "pill warn"; banner.innerHTML = ""; return; }
+  if (!state.user) { banner.innerHTML = ""; return; }
+  const pw = passwordWarning(state.user);
+  if (!s) { pill.textContent = t("offline"); pill.className = "pill warn"; banner.innerHTML = pw; return; }
   const apis = s.providers.filter((p) => p.configured && p.method === "api");
-  const erroring = apis.filter((p) => p.last_error && (!p.last_ok || p.last_error_at > p.last_ok));
+  const erroring = can("usage") ? apis.filter((p) => p.last_error && (!p.last_ok || p.last_error_at > p.last_ok)) : [];
   const methods = (s.last_refresh && s.last_refresh.odds_methods) || [];
-  let html = "";
-  if (s.storage && !s.storage.persistent) html += `<div class="banner err"><div class="grow">${t("storage_warn")}</div></div>`;
+  let html = pw;
+  if (s.storage && !s.storage.persistent && can("admin")) html += `<div class="banner err"><div class="grow">${t("storage_warn")}</div></div>`;
   if (methods.length === 1 && methods[0] === "scraping") {
     pill.textContent = t("pill_scraping"); pill.className = "pill orange";
   } else if (!apis.length) {
     pill.textContent = t("pill_manual"); pill.className = "pill warn";
-    if ((location.hash || "#home") !== "#home") html += `<div class="banner warn"><div class="grow">${t("banner_none")}</div></div>`;
+    if ((location.hash || "#home") !== "#home" && can("admin")) html += `<div class="banner warn"><div class="grow">${t("banner_none")}</div></div>`;
   } else if (erroring.length) {
     pill.textContent = t("pill_error"); pill.className = "pill warn";
     html += `<div class="banner err"><div class="grow"><b>${esc(erroring[0].label)}:</b> ${esc(erroring[0].last_error)}</div></div>`;
@@ -216,13 +246,13 @@ function renderHome(d) {
   const method = methods.includes("scraping") && !methods.includes("api") ? t("u_m_scraping") : methods.length ? t("u_m_api") : t("u_m_manual");
   const tile = (k, v, href, cls = "") => `<a class="tile" href="${href}"><div class="k">${esc(k)}</div><div class="v ${cls}">${v}</div></a>`;
   const tr = d.tracker;
-  const setup = st.any_live_source ? "" : `<div class="card setup"><b>${esc(t("setup_title"))}</b><div class="small muted">${esc(t("setup_sub"))}</div>
+  const setup = st.any_live_source || !can("admin") ? "" : `<div class="card setup"><b>${esc(t("setup_title"))}</b><div class="small muted">${esc(t("setup_sub"))}</div>
     <ol class="small"><li>${t("setup_1")}</li><li>${t("setup_2")}</li><li>${t("setup_3")}</li><li>${t("setup_4")}</li></ol></div>`;
   return head(t("dash_title"), esc(t("dash_sub"))) + setup + `
     <div class="card status-strip"><div class="row wrap">
       <span class="small muted">${esc(t("method_now"))}:</span> <b>${esc(method)}</b>
       <span class="small muted">· ${esc(t("odds_updated", { t: agoIso(d.odds_updated_at) }))}</span>
-      <a class="small" href="#usage" style="margin-left:auto">${esc(t("more_usage"))} ›</a></div></div>
+      ${can("usage") ? `<a class="small" href="#usage" style="margin-left:auto">${esc(t("more_usage"))} ›</a>` : ""}</div></div>
     <div class="tiles" style="margin-top:10px">
       ${tile(t("t_matches"), c.with_odds, "#scanner")}${tile(t("t_value"), c.value_bets, "#scanner", c.value_bets ? "pos" : "")}
       ${tile(t("t_errors"), c.pricing_errors, "#scanner", c.pricing_errors ? "neg-red" : "")}${tile(t("t_arbs"), c.arbitrage, "#arbitrage")}
@@ -355,7 +385,7 @@ function renderMatch(a) {
     </div>
     ${warn}
     <details class="market" style="margin-top:10px"><summary><span>${esc(t("m_data"))}</span><span class="small muted">${esc(t("odds_updated", { t: agoIso(a.odds_updated_at) }))}</span></summary>${dataRows}</details>
-    ${started ? "" : `<button class="btn ghost small" style="margin-top:10px" data-action="fetchMore" data-fid="${esc(fx.id)}">${esc(t("m_more_books"))}</button>`}
+    ${started || !can("refresh") ? "" : `<button class="btn ghost small" style="margin-top:10px" data-action="fetchMore" data-fid="${esc(fx.id)}">${esc(t("m_more_books"))}</button>`}
   </div>
   <div class="section-title">${esc(t("m_value"))}</div>
   <div class="card sel-list">${sels.length ? sels.slice(0, 14).map((s) => selRow(s, started, fx)).join("") : `<div class="muted small">${esc(t("m_no_estimate"))}</div>`}</div>
@@ -453,7 +483,7 @@ function teamNewsSection(a, started) {
   const fx = a.fixture, tn = a.team_news;
   const team = (side) => (side === "home" ? fx.home : fx.away);
   const manual = tn.absences.map((x) => `<div class="list-row"><div><b>${esc(x.player)}</b> <span class="muted small">${esc(team(x.team))} · ${esc(t(`k_${x.kind}`))} · ${esc(t(`i_${x.importance}`))}${x.reason ? " · " + esc(x.reason) : ""}</span></div>
-      ${x.source === "manual" ? `<button class="btn danger small" data-action="delAbsence" data-fid="${esc(fx.id)}" data-aid="${esc(x.id)}">${esc(t("remove"))}</button>` : srcChip(sourceKind(x.source))}</div>`).join("");
+      ${x.source === "manual" && can("manual") ? `<button class="btn danger small" data-action="delAbsence" data-fid="${esc(fx.id)}" data-aid="${esc(x.id)}">${esc(t("remove"))}</button>` : srcChip(sourceKind(x.source))}</div>`).join("");
   const prov = tn.provider.absences.map((x) => `<div class="list-row"><div><b>${esc(x.player)}</b> <span class="muted small">${esc(team(x.team))} · ${esc(t(`k_${x.kind}`))}${x.reason ? " · " + esc(x.reason) : ""}</span></div>${srcChip("live")}</div>`).join("");
   const lu = (side) => { const l = tn.lineups[side]; return `<div class="field"><label class="f">${esc(t("tn_lineup", { t: team(side) }))}</label><div class="row">
       <select class="input" data-lineup="${side}" data-field="status">${["unknown", "expected", "confirmed"].map((s) => `<option value="${s}" ${l.status === s ? "selected" : ""}>${esc(t(`lu_${s}`))}</option>`).join("")}</select>
@@ -467,6 +497,7 @@ function teamNewsSection(a, started) {
       <div class="tiny faint" style="margin-top:4px">${esc(t("xg_note"))}</div><button class="btn ghost small" type="submit" style="margin-top:8px">${esc(t("xg_save"))}</button></form>` : "";
   const provHead = prov ? `<div class="small muted" style="margin-bottom:4px">${esc(t("tn_from", { s: tn.provider.absences_source }))}</div>${prov}`
     : tn.provider.absences_source ? `<div class="small muted">${esc(t("tn_none_reported", { s: tn.provider.absences_source }))}</div>` : `<div class="small muted">${esc(t("tn_no_feed"))}</div>`;
+  if (!can("manual")) return `<div class="card">${provHead}${manual ? `<div class="small muted" style="margin:10px 0 4px">${esc(t("tn_manual"))}</div>${manual}` : ""}</div>`;
   return `<div class="card">${provHead}
     ${manual ? `<div class="small muted" style="margin:10px 0 4px">${esc(t("tn_manual"))}</div>${manual}` : ""}
     <form data-submit="addAbsence" data-fid="${esc(fx.id)}" style="margin-top:12px"><div class="grid-2">
@@ -693,12 +724,16 @@ async function submitAddOdds(form) {
 
 // ---------------------------------------------------------------------- more
 function viewMore() {
-  const item = (href, title, d, icon) => `<a class="card click menu-item" href="${href}"><span class="mi">${icon}</span><div><b>${esc(t(title))}</b><div class="small muted">${esc(t(d))}</div></div><span class="faint">›</span></a>`;
+  const item = (href, title, d, icon, extra = "") => `<a class="card click menu-item" href="${href}"><span class="mi">${icon}</span><div><b>${esc(t(title))}</b> ${extra}<div class="small muted">${esc(t(d))}</div></div><span class="faint">›</span></a>`;
+  const pending = can("admin") && state.user.pending_requests ? chip("red", String(state.user.pending_requests)) : "";
   view.innerHTML = head(t("more_title")) +
     item("#agents", "more_agents", "more_agents_d", "🧠") + item("#arbitrage", "more_arb", "more_arb_d", "♻") +
     item("#builder", "more_builder", "more_builder_d", "🧩") + item("#tracker", "more_tracker", "more_tracker_d", "📈") +
-    item("#usage", "more_usage", "more_usage_d", "📊") + item("#sources", "more_sources", "more_sources_d", "⚙") +
-    `<div class="card spread" style="margin-top:10px"><b>${esc(t("language"))}</b><div class="seg"><button data-action="setLang" data-v="en" class="${state.lang === "en" ? "on" : ""}">English</button><button data-action="setLang" data-v="da" class="${state.lang === "da" ? "on" : ""}">Dansk</button></div></div>`;
+    (can("usage") ? item("#usage", "more_usage", "more_usage_d", "📊") : "") +
+    (can("admin") ? item("#sources", "more_sources", "more_sources_d", "⚙") + item("#users", "more_users", "more_users_d", "👥", pending) : "") +
+    item("#account", "more_account", "more_account_d", "👤") +
+    `<div class="card spread" style="margin-top:10px"><b>${esc(t("language"))}</b><div class="seg"><button data-action="setLang" data-v="en" class="${state.lang === "en" ? "on" : ""}">English</button><button data-action="setLang" data-v="da" class="${state.lang === "da" ? "on" : ""}">Dansk</button></div></div>
+    <button class="btn ghost block" type="button" data-action="signOut" style="margin-top:12px">${esc(t("ac_sign_out"))} (${esc(state.user.username)})</button>`;
 }
 
 // -------------------------------------------------------------------- agents
@@ -944,13 +979,15 @@ function renderSources(status, settings, books, comps) {
 async function setLanguage(lang) {
   state.lang = lang; store.set("bf_lang", lang);
   applyLanguage();
-  try { await api("/api/settings", { method: "PUT", body: { language: lang } }); } catch (_) { /* offline */ }
+  if (!state.user) { renderLogin(); return; }
+  try { state.user = await api("/api/account", { method: "PUT", body: { language: lang } }); } catch (_) { /* offline */ }
   state.markets = {}; state.competitions = {};
   await loadStatus(); route();
 }
 async function askStake() { const v = prompt(t("stake_prompt"), "1"); return v === null ? null : parseFloat(v) || 1; }
 
 const actions = {
+  ...AUTH_ACTIONS,
   openMatch: (el) => { location.hash = `#match/${encodeURIComponent(el.dataset.id)}`; },
   back: () => { if (history.length > 1) history.back(); else location.hash = "#home"; },
   setLang: (el) => setLanguage(el.dataset.v),
@@ -1036,6 +1073,7 @@ const putSettings = async (body, msg) => { try { await api("/api/settings", { me
 const splitList = (v) => String(v || "").split(",").map((x) => x.trim()).filter(Boolean);
 
 const submits = {
+  ...AUTH_SUBMITS,
   addOdds: submitAddOdds,
   addAbsence: async (form) => {
     try { await api(`/api/fixtures/${encodeURIComponent(form.dataset.fid)}/absences`, { method: "POST", body: Object.fromEntries(new FormData(form)) }); toast(t("s_saved")); route(); } catch (err) { toast(err.message); }
@@ -1073,8 +1111,7 @@ const submits = {
   saveSettings: async (form) => {
     const fd = new FormData(form), body = {};
     for (const [k, v] of fd.entries()) body[k] = ["max_risk", "devig_method", "timezone", "language", "currency"].includes(k) ? v : Number(v);
-    if (body.language && body.language !== state.lang) { state.lang = body.language; store.set("bf_lang", state.lang); applyLanguage(); }
-    await putSettings(body);
+    await putSettings(body);  // "language" here is the default for notifications; each account picks its own
   },
 };
 
@@ -1083,19 +1120,27 @@ document.addEventListener("change", (e) => { const el = e.target.closest("[data-
 document.addEventListener("input", (e) => { const el = e.target.closest("[data-input]"); if (el && inputs[el.dataset.input]) inputs[el.dataset.input](el, e); });
 document.addEventListener("submit", (e) => { const f = e.target.closest("[data-submit]"); if (f && submits[f.dataset.submit]) { e.preventDefault(); submits[f.dataset.submit](f, e); } });
 $("#refreshBtn").addEventListener("click", doRefresh);
-$("#sourcePill").addEventListener("click", () => { location.hash = "#usage"; });
+$("#sourcePill").addEventListener("click", () => { if (can("usage")) location.hash = "#usage"; });
+$("#userBtn").addEventListener("click", () => { location.hash = can("admin") && state.user.pending_requests ? "#users" : "#account"; });
 $("#langBtn").addEventListener("click", () => setLanguage(state.lang === "da" ? "en" : "da"));
 
 // -------------------------------------------------------------------- router
-const MORE_TABS = ["more", "agents", "arbitrage", "builder", "tracker", "usage", "sources"];
+const MORE_TABS = ["more", "agents", "arbitrage", "builder", "tracker", "usage", "sources", "account", "users"];
+const NEEDS = { add: "manual", usage: "usage", sources: "admin", users: "admin" };
 function route() {
   const hash = location.hash.replace(/^#/, "") || "home";
   const [tab, ...rest] = hash.split("/");
   const token = ++state.routeToken;
+  if (!state.user) { renderLogin(); return; }
   const nav = tab === "match" ? "scanner" : MORE_TABS.includes(tab) ? "more" : tab;
   $$(".topnav a").forEach((a) => a.classList.toggle("on", a.dataset.tab === nav));
   const views = { home: viewHome, scanner: viewScanner, picks: viewPicks, add: viewAdd, more: viewMore, agents: viewAgents,
-    arbitrage: viewArbitrage, builder: viewBuilder, tracker: viewTracker, usage: viewUsage, sources: viewSources };
+    arbitrage: viewArbitrage, builder: viewBuilder, tracker: viewTracker, usage: viewUsage, sources: viewSources,
+    account: viewAccount, users: viewUsers };
+  if (NEEDS[tab] && !can(NEEDS[tab])) {
+    view.innerHTML = head(t("no_access_title")) + `<div class="empty">${esc(t("no_access"))}</div>`;
+    return;
+  }
   if (tab === "match" && rest.length) viewMatch(token, decodeURIComponent(rest.join("/")));
   else (views[tab] || viewHome)(token);
   if (!rest.length) window.scrollTo(0, 0);
@@ -1104,13 +1149,8 @@ window.addEventListener("hashchange", route);
 
 (async function init() {
   applyLanguage();
-  try { state.catalog = await api("/api/catalog"); } catch (_) { state.catalog = { categories: {}, sports: {} }; }
-  await loadStatus();
-  if (state.status && state.status.language && state.status.language !== state.lang) {
-    // server-written texts (agents, coupons) must match the language shown in this browser
-    if (store.get("bf_lang", null) === null) { state.lang = state.status.language; applyLanguage(); }
-    else { try { await api("/api/settings", { method: "PUT", body: { language: state.lang } }); } catch (_) { /* read-only */ } }
-  }
-  route();
+  try { state.user = await api("/api/auth/me", { quiet: true }); } catch (_) { state.user = null; }
+  if (state.user) await startApp();
+  else renderLogin("login");
   if ("serviceWorker" in navigator) navigator.serviceWorker.register("/sw.js").catch(() => {});
 })();

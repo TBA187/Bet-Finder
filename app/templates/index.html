@@ -30,6 +30,7 @@
     <div class="top-actions">
       <button id="sourcePill" class="pill" type="button">…</button>
       <button id="langBtn" class="icon-btn lang" type="button" aria-label="Language">DA</button>
+      <button id="userBtn" class="icon-btn" type="button" aria-label="My account"></button>
       <button id="refreshBtn" class="icon-btn" type="button" aria-label="Refresh odds data" title="Refresh">
         <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.34-5.66M20 4v5h-5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
       </button>
@@ -40,7 +41,9 @@
   <main id="view" class="view" tabindex="-1"></main>
 
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <div id="modal" class="modal" hidden></div>
   <script src="/static/js/i18n.js?v={{ version }}"></script>
+  <script src="/static/js/auth.js?v={{ version }}"></script>
   <script src="/static/js/app.js?v={{ version }}"></script>
 </body>
 </html>

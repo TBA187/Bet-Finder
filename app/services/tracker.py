@@ -39,8 +39,17 @@ class TrackerService:
         data = self.repo.store.read(self.FILE, [])
         return data if isinstance(data, list) else []
 
+    @staticmethod
+    def _mine(item: dict, owner: Optional[str], legacy: bool) -> bool:
+        """owner=None means everything (scripts, tests); otherwise one account's bets,
+        plus bets from before accounts existed when ``legacy`` is set."""
+        if owner is None:
+            return True
+        return item.get("owner") == owner or (legacy and not item.get("owner"))
+
     # ----------------------------------------------------------------- create
-    def track(self, legs: list[dict], *, title: str, stake: float, source: str, note: str = "") -> dict:
+    def track(self, legs: list[dict], *, title: str, stake: float, source: str, note: str = "",
+              owner: Optional[str] = None) -> dict:
         if not legs:
             raise TrackerError("Nothing to track")
         if len({leg["fixture_id"] for leg in legs}) != len(legs):
@@ -72,24 +81,24 @@ class TrackerService:
             "id": uuid.uuid4().hex[:12], "created_at": utcnow().isoformat(), "kind": "coupon" if len(clean) > 1 else "single",
             "title": title, "stake": float(stake), "source": source, "note": note,
             "is_demo": any(leg["is_demo"] for leg in clean), "legs": clean, "combined_odds": round(total, 3),
-            "status": "pending", "return": None, "profit": None, "manual_result": False,
+            "status": "pending", "return": None, "profit": None, "manual_result": False, "owner": owner,
         }
         with self.repo.store.edit(self.FILE, []) as data:
             data.append(item)
         return item
 
-    def delete(self, item_id: str) -> bool:
+    def delete(self, item_id: str, owner: Optional[str] = None, legacy: bool = False) -> bool:
         with self.repo.store.edit(self.FILE, []) as data:
             before = len(data)
-            data[:] = [i for i in data if i.get("id") != item_id]
+            data[:] = [i for i in data if not (i.get("id") == item_id and self._mine(i, owner, legacy))]
             return len(data) != before
 
-    def settle_manual(self, item_id: str, status: str) -> dict:
+    def settle_manual(self, item_id: str, status: str, owner: Optional[str] = None, legacy: bool = False) -> dict:
         if status not in ("won", "lost", "void", "pending"):
             raise TrackerError("status must be won, lost, void or pending")
         with self.repo.store.edit(self.FILE, []) as data:
             for item in data:
-                if item.get("id") == item_id:
+                if item.get("id") == item_id and self._mine(item, owner, legacy):
                     item["status"] = status
                     item["manual_result"] = status != "pending"
                     mult = {"won": item["combined_odds"], "lost": 0.0, "void": 1.0}.get(status)
@@ -164,9 +173,10 @@ class TrackerService:
         return out or None
 
     # ------------------------------------------------------------------ read
-    def overview(self, settings: dict, include_demo: bool = True) -> dict:
+    def overview(self, settings: dict, include_demo: bool = True, owner: Optional[str] = None, legacy: bool = False) -> dict:
         self.refresh(settings)
-        items = sorted(self._items(), key=lambda i: i.get("created_at", ""), reverse=True)
+        items = sorted((i for i in self._items() if self._mine(i, owner, legacy)),
+                       key=lambda i: i.get("created_at", ""), reverse=True)
         if not include_demo:
             items = [i for i in items if not i.get("is_demo")]
         real = [i for i in items if not i.get("is_demo")]

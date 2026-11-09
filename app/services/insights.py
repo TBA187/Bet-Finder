@@ -157,6 +157,9 @@ def usage(provider_status: dict, settings: dict, providers: list, secret_source,
             state = "ok"
         else:
             state = "pending"
+        backup = p.name == "oddspapi" or (p.name == "scraper" and settings.get("scraper_mode", "fallback") == "fallback")
+        if state == "pending" and backup:
+            state = "standby"  # a backup source: it only runs when the main source has no key or credits left
         hint = None
         if not p.configured():
             err = ""  # errors of a removed key are history
@@ -166,6 +169,8 @@ def usage(provider_status: dict, settings: dict, providers: list, secret_source,
             hint = "free_plan_seasons"
         elif "quota" in err or "rate limit" in err:
             hint = "quota"
+        elif state == "standby":
+            hint = f"standby_{p.name}"
         key_name = {"the_odds_api": "odds_api_key", "api_sports": "api_sports_key", "odds_api_io": "odds_api_io_key",
                     "oddspapi": "oddspapi_key"}.get(p.name)
         rows.append({

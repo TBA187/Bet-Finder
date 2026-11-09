@@ -54,6 +54,8 @@ def client(paths, monkeypatch):
     monkeypatch.delenv("API_SPORTS_KEY", raising=False)
     app = create_app(paths, background=False)
     with TestClient(app) as c:
+        # every API call needs a signed-in account: use the first super admin
+        assert c.post("/api/auth/login", json={"login": "admin", "password": "admin"}).status_code == 200
         # tests must never reach the internet: no scraping fallback
         c.put("/api/settings", json={"scraper_mode": "off"})
         yield c

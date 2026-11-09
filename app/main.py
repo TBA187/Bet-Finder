@@ -4,15 +4,17 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import hashlib
-import hmac
 import json
 import logging
 import os
+import re
 from datetime import datetime, timedelta, timezone
 from typing import Optional
+from urllib.parse import urlparse
 
 from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse, JSONResponse
+from starlette.concurrency import run_in_threadpool
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
@@ -21,6 +23,7 @@ from app.core.models import Fixture, utcnow
 from app.core.odds_math import OddsError
 from app.services import notify
 from app.services.analysis import AnalysisService
+from app.services.auth import CURRENT_USER, AuthError, AuthService, permissions
 from app.services.daily_picks import build_daily_picks
 from app.services.registry import Registry
 from app.services.repository import Repository
@@ -44,11 +47,15 @@ class Container:
         self.tracker = TrackerService(self.repo, self.registry)
         self.refresh = RefreshService(self.repo, self.registry, self.settings, self.tracker)
         self.refresh.after = self._after_refresh
-        self.token = os.environ.get("BETFINDER_TOKEN", "").strip()
+        self.auth = AuthService(self.store)
         try:  # BetFinder uses live data only: remove anything left from the old demo mode
             self.repo.purge_demo()
         except Exception:
             log.exception("could not purge old demo data")
+        try:  # first start: super admin  admin / admin  (BetFinder asks to change it)
+            self.auth.ensure_admin()
+        except Exception:
+            log.exception("could not create the first admin account")
 
     # shared views used by several endpoints and by the scheduler -----------
     def upcoming(self, now: datetime, s: dict) -> list[Fixture]:
@@ -104,6 +111,39 @@ async def _auto_refresh(container: Container) -> None:
             log.exception("Automatic refresh failed")
 
 
+# -------------------------------------------------------------- access rules
+PUBLIC_API = {"/api/health", "/api/auth/login", "/api/auth/logout", "/api/auth/request-account", "/api/auth/forgot-password"}
+ANY = ("GET", "HEAD", "POST", "PUT", "PATCH", "DELETE")
+RULES = [  # first match wins; anything not listed: reading = "view", changing = "admin"
+    (("POST",), re.compile(r"^/api/refresh$"), "refresh"),
+    (("POST",), re.compile(r"^/api/fixtures/[^/]+/fetch-more$"), "refresh"),
+    (("POST",), re.compile(r"^/api/manual/"), "manual"),
+    (("POST", "PUT", "DELETE"), re.compile(r"^/api/fixtures/[^/]+/(quotes|absences|lineups|xg|result)(/|$)"), "manual"),
+    (("POST",), re.compile(r"^/api/builder$"), "view"),
+    (("POST", "DELETE"), re.compile(r"^/api/tracker(/|$)"), "track"),
+    (("GET",), re.compile(r"^/api/(usage|credits-plan)$"), "usage"),
+    (("GET",), re.compile(r"^/api/settings$"), "admin"),
+    (ANY, re.compile(r"^/api/admin(/|$)"), "admin"),
+    (ANY, re.compile(r"^/api/(auth|account)(/|$)"), "view"),
+]
+
+
+def required_permission(method: str, path: str) -> str:
+    for methods, pattern, perm in RULES:
+        if method in methods and pattern.match(path):
+            return perm
+    return "view" if method in ("GET", "HEAD") else "admin"
+
+
+def _same_site(request: Request) -> bool:
+    """Blocks other websites from sending changes with a signed-in visitor's cookie."""
+    origin = request.headers.get("origin") or request.headers.get("referer")
+    if not origin:
+        return True  # not a browser form (curl, scripts); the session cookie is still required
+    host = request.headers.get("x-forwarded-host") or request.headers.get("host") or ""
+    return urlparse(origin).netloc == host
+
+
 def create_app(paths: Optional[Paths] = None, *, background: bool = True) -> FastAPI:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     container = Container(paths or Paths.default())
@@ -121,12 +161,33 @@ def create_app(paths: Optional[Paths] = None, *, background: bool = True) -> Fas
     app.state.container = container
 
     @app.middleware("http")
-    async def token_guard(request: Request, call_next):
+    async def access_guard(request: Request, call_next):
         path = request.url.path
-        if container.token and path.startswith("/api/") and path != "/api/health" and not path.startswith("/api/cron/"):
-            if not hmac.compare_digest(request.headers.get("x-betfinder-token", ""), container.token):
-                return JSONResponse({"detail": "Access token required"}, status_code=401)
-        return await call_next(request)
+        if not path.startswith("/api/") or path.startswith("/api/cron/"):
+            return await call_next(request)  # pages, static files, scheduler (has its own secret)
+        if request.method not in ("GET", "HEAD", "OPTIONS") and not _same_site(request):
+            return JSONResponse({"detail": "Request blocked: it did not come from this site", "code": "cross_site"}, 403)
+        if path in PUBLIC_API:
+            return await call_next(request)
+        token = request.cookies.get("bf_session")
+        try:
+            user = await run_in_threadpool(container.auth.session_user, token) if token else None
+        except Exception:
+            log.exception("session check failed")
+            return JSONResponse({"detail": "Storage is not reachable right now. Try again.", "code": "storage"}, 503)
+        if not user:
+            return JSONResponse({"detail": "Please sign in", "code": "auth_required"}, 401)
+        if required_permission(request.method, path) not in permissions(user["role"]):
+            return JSONResponse({"detail": "Your account does not have access to this", "code": "forbidden"}, 403)
+        reset = CURRENT_USER.set(user)
+        try:
+            return await call_next(request)
+        finally:
+            CURRENT_USER.reset(reset)
+
+    @app.exception_handler(AuthError)
+    async def auth_error(_request: Request, exc: AuthError):
+        return JSONResponse({"detail": str(exc), "code": exc.code}, status_code=exc.status)
 
     @app.exception_handler(SettingsError)
     @app.exception_handler(TrackerError)
@@ -148,6 +209,8 @@ def create_app(paths: Optional[Paths] = None, *, background: bool = True) -> Fas
         return FileResponse(static_dir / "sw.js", media_type="application/javascript",
                             headers={"Cache-Control": "no-cache", "Service-Worker-Allowed": "/"})
 
+    from app.api.auth_routes import build_auth_router
     from app.api.routes import build_router
+    app.include_router(build_auth_router(container), prefix="/api")
     app.include_router(build_router(container), prefix="/api")
     return app

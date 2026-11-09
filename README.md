@@ -103,8 +103,9 @@ Formulas:
 See **[SETUP.md](SETUP.md)**. In short:
 
 1. Connect **Upstash Redis** (free) under Vercel → Storage, because Vercel has no permanent disk.
-2. Add your keys plus `BETFINDER_TOKEN` and `CRON_SECRET` as environment variables, then redeploy.
-3. Add `BETFINDER_URL` and `CRON_SECRET` as GitHub secrets. The included GitHub Action then refreshes hourly, since the free Vercel plan's cron job runs only once a day.
+2. Add your keys plus `CRON_SECRET` as environment variables, then redeploy.
+3. Sign in with **admin / admin** and change the password at once (*More → My account*).
+4. Add `BETFINDER_URL` and `CRON_SECRET` as GitHub secrets. The included GitHub Action then refreshes hourly, since the free Vercel plan's cron job runs only once a day.
 
 `vercel.json`, `pyproject.toml` and `.vercelignore` are already set up: Frankfurt region, 300 s max duration and a daily cron job.
 
@@ -116,7 +117,7 @@ See **[SETUP.md](SETUP.md)**. In short:
    ```bash
    cp .env.example .env
    ```
-   Set `DOMAIN` and a long random `BETFINDER_TOKEN` (anyone who opens the site needs it), plus the API keys you use.
+   Set `DOMAIN`, `CRON_SECRET` and the API keys you use. Sign in with **admin / admin** and change the password at once.
 4. **Start:**
    ```bash
    docker compose up -d

@@ -77,7 +77,9 @@ def test_cron_endpoint_auth(paths, monkeypatch):
     from app.main import create_app
     monkeypatch.setenv("CRON_SECRET", "cron-123")
     with TestClient(create_app(paths, background=False)) as c:
-        c.put("/api/settings", json={"scraper_mode": "off"})
+        c.post("/api/auth/login", json={"login": "admin", "password": "admin"})
+        assert c.put("/api/settings", json={"scraper_mode": "off"}).status_code == 200
+        c.post("/api/auth/logout")
         assert c.get("/api/cron/refresh").status_code == 401
         assert c.get("/api/cron/refresh", headers={"Authorization": "Bearer wrong"}).status_code == 401
         r = c.get("/api/cron/refresh", headers={"Authorization": "Bearer cron-123"})
@@ -146,14 +148,15 @@ def test_settings_validation(client):
     assert r["odds_api_key"]["configured"] and "abcdefgh" not in str(r)  # key never echoed back
 
 
-def test_token_guard(paths, monkeypatch):
+def test_sign_in_required(paths):
     from fastapi.testclient import TestClient
     from app.main import create_app
-    monkeypatch.setenv("BETFINDER_TOKEN", "s3cret")
     with TestClient(create_app(paths, background=False)) as c:
         assert c.get("/api/health").status_code == 200
         assert c.get("/api/status").status_code == 401
-        assert c.get("/api/status", headers={"X-BetFinder-Token": "s3cret"}).status_code == 200
+        assert c.get("/", follow_redirects=False).status_code == 200  # the page itself shows the sign-in form
+        assert c.post("/api/auth/login", json={"login": "admin", "password": "admin"}).status_code == 200
+        assert c.get("/api/status").status_code == 200
 
 
 # ----------------------------------------------------------------- providers

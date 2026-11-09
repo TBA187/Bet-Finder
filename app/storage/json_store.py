@@ -118,6 +118,9 @@ class BaseStore:
     def cleanup(self, prefix: str, older_than_seconds: int) -> int:
         return 0
 
+    def forget(self, name: str) -> None:
+        """Drop any cached copy so the next read comes straight from storage."""
+
 
 class JsonStore(BaseStore):
     """JSON files under ``root``."""
@@ -301,6 +304,9 @@ class RedisStore(BaseStore):
 
     def exists(self, name: str) -> bool:
         return bool(self._cmd("EXISTS", self.prefix + _check_name(name)))
+
+    def forget(self, name: str) -> None:
+        self._cache.pop(name, None)
 
     def list(self, prefix: str) -> list[str]:
         keys, cursor = [], "0"
