@@ -207,7 +207,7 @@ M: dict[str, tuple[str, str]] = {
     "dp_indep": ("Legs are from different matches and treated as independent.", "Valgene er fra forskellige kampe og behandles som uafhængige."),
     "refresh_no_source": ("No live data source delivered odds. Add a free API key under Sources (see the setup guide) or enter odds manually.",
                           "Ingen live datakilde leverede odds. Tilføj en gratis API-nøgle under Kilder (se opsætningsguiden), eller indtast odds manuelt."),
-    "tracker_daily": ("Daily pick {day} – {title}", "Dagens spil {day} – {title}"),
+    "tracker_daily": ("Daily pick {day} – {title}", "Daily Picks {day} – {title}"),
     # ---- API errors shown to the user
     "err_choose_match": ("Choose a match, or give sport, home and away teams.", "Vælg en kamp, eller angiv sport, hjemme- og udehold."),
     "err_reversed": ("Found {name} with home and away reversed. Select the match from the list.",

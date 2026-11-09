@@ -254,7 +254,7 @@ async function copyText(text) {
 // ------------------------------------------------------------ handlers
 const AUTH_ACTIONS = {
   authMode: (el) => renderLogin(el.dataset.v),
-  usersTab: (el) => { usersState.tab = el.dataset.v; usersState.picked = true; route(); },
+  usersTab: (el) => { usersState.tab = el.dataset.v; usersState.picked = true; if (location.hash === `#users/${el.dataset.v}`) route(); else location.hash = `#users/${el.dataset.v}`; },
   closeModal: () => { closeModal(); route(); },
   copyText: (el) => copyText(el.dataset.text || ""),
   signOut: async () => {

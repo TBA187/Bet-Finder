@@ -144,6 +144,7 @@ function applyLanguage() {
   renderSidebar();
   $("#userBtn").title = t("more_account");
   $("#userBtn").setAttribute("aria-label", t("more_account"));
+  document.dispatchEvent(new Event("bf-lang"));
 }
 
 /** Show only what the signed-in account may use (the server checks it again). */
@@ -168,7 +169,7 @@ async function startApp() {
     try { state.catalog = await api("/api/catalog"); } catch (_) { state.catalog = { categories: {}, sports: {} }; }
   }
   await loadStatus();
-  route();
+  route(true);
 }
 
 async function loadStatus() {
@@ -177,26 +178,33 @@ async function loadStatus() {
   renderTop();
 }
 
+function setPill(pill, cls, full, short) {
+  pill.className = `pill ${cls}`;
+  pill.innerHTML = `<i class="pill-dot"></i><span class="pill-full">${esc(full)}</span><span class="pill-short">${esc(short || full)}</span>`;
+  pill.title = full; pill.setAttribute("aria-label", full);
+}
+
 function renderTop() {
   const s = state.status, pill = $("#sourcePill"), banner = $("#banner");
   if (!state.user) { banner.innerHTML = ""; return; }
   const pw = passwordWarning(state.user);
-  if (!s) { pill.textContent = t("offline"); pill.className = "pill warn"; banner.innerHTML = pw; return; }
+  if (!s) { setPill(pill, "warn", t("offline")); banner.innerHTML = pw; return; }
   const apis = s.providers.filter((p) => p.configured && p.method === "api");
   const erroring = can("usage") ? apis.filter((p) => p.last_error && (!p.last_ok || p.last_error_at > p.last_ok)) : [];
   const methods = (s.last_refresh && s.last_refresh.odds_methods) || [];
   let html = pw;
   if (s.storage && !s.storage.persistent && can("admin")) html += `<div class="banner err"><div class="grow">${t("storage_warn")}</div></div>`;
   if (methods.length === 1 && methods[0] === "scraping") {
-    pill.textContent = t("pill_scraping"); pill.className = "pill orange";
+    setPill(pill, "orange", t("pill_scraping"));
   } else if (!apis.length) {
-    pill.textContent = t("pill_manual"); pill.className = "pill warn";
+    setPill(pill, "warn", t("pill_manual"));
     if ((location.hash || "#home") !== "#home" && can("admin")) html += `<div class="banner warn"><div class="grow">${t("banner_none")}</div></div>`;
   } else if (erroring.length) {
-    pill.textContent = t("pill_error"); pill.className = "pill warn";
+    setPill(pill, "warn", t("pill_error"));
     html += `<div class="banner err"><div class="grow"><b>${esc(erroring[0].label)}:</b> ${esc(erroring[0].last_error)}</div></div>`;
   } else {
-    pill.textContent = t("pill_live", { n: apis.length }); pill.className = "pill ok";
+    const full = t("pill_live", { n: apis.length });
+    setPill(pill, "ok", full, `${full.split(" · ")[0]} · ${apis.length}`);
   }
   banner.innerHTML = html;
 }
@@ -1148,38 +1156,55 @@ $("#userBtn").addEventListener("click", () => { location.hash = can("admin") && 
 // -------------------------------------------------------------------- router
 const MORE_TABS = ["more", "agents", "arbitrage", "builder", "tracker", "usage", "sources", "account", "users", "admin"];
 const NEEDS = { add: "manual", usage: "usage", sources: "admin", users: "admin", admin: "admin" };
-function route() {
+/** The scanner entries in the side menu are filters; they only apply when chosen, never on a re-render. */
+function applyScannerFilter(section) {
+  if (section === "all") Object.assign(state.scanner, { category: "", sport: "", value_only: false });
+  else if (section === "valueonly") Object.assign(state.scanner, { category: "", sport: "", value_only: true });
+  else if (section.startsWith("cat-")) Object.assign(state.scanner, { category: section.slice(4), sport: "" });
+}
+const USERS_TABS = ["requests", "users", "new", "activity"];
+
+/** fromHash: the address was just changed (link, menu, reload). A plain route() only redraws the page
+ * after something inside it changed, so the address must not overrule the choice just made there. */
+function route(fromHash = false) {
   const hash = location.hash.replace(/^#/, "") || "home";
   const [tab, ...rest] = hash.split("/");
   const token = ++state.routeToken;
+  side.spy = "";
+  if (!fromHash) {  // keep the page where it is while it redraws
+    const h = view.offsetHeight;
+    view.style.minHeight = `${h}px`;
+    setTimeout(() => { view.style.minHeight = ""; }, 1200);
+  } else view.style.minHeight = "";
   if (!state.user) { renderLogin(); return; }
   const nav = tab === "match" ? "scanner" : MORE_TABS.includes(tab) ? "more" : tab;
   $$(".topnav a").forEach((a) => a.classList.toggle("on", a.dataset.tab === nav));
   const views = { home: viewHome, scanner: viewScanner, picks: viewPicks, add: viewAdd, more: viewMore, agents: viewAgents,
     arbitrage: viewArbitrage, builder: viewBuilder, tracker: viewTracker, usage: viewUsage, sources: viewSources,
     account: viewAccount, users: viewUsers, admin: viewAdmin };
-  renderSidebar();
   if (NEEDS[tab] && !can(NEEDS[tab])) {
+    renderSidebar();
     view.innerHTML = head(t("no_access_title")) + `<div class="empty">${esc(t("no_access"))}</div>`;
     return;
   }
   let section = rest[0] || "";
-  if (tab === "scanner" && section) {  // shortcuts from the side menu
-    if (section === "all") Object.assign(state.scanner, { category: "", sport: "", value_only: false });
-    else if (section === "valueonly") state.scanner.value_only = true;
-    else if (section.startsWith("cat-")) Object.assign(state.scanner, { category: section.slice(4), sport: "" });
+  if (fromHash && tab === "scanner" && section) { applyScannerFilter(section); section = ""; }
+  if (tab === "users" && USERS_TABS.includes(section)) {  // the tabs of that page live in the address
+    if (fromHash) { usersState.tab = section; usersState.picked = true; }
     section = "";
   }
-  if (tab === "users" && section) { usersState.tab = section; usersState.picked = true; section = ""; }
   if (tab === "match" && rest.length) viewMatch(token, decodeURIComponent(rest.join("/")));
   else (views[tab] || viewHome)(token);
+  renderSidebar();
+  if (!fromHash) return;
   if (section && tab !== "match") scrollToSection(section, token);
   else if (!rest.length || tab !== "match") window.scrollTo(0, 0);
 }
-window.addEventListener("hashchange", route);
+window.addEventListener("hashchange", () => route(true));
 
 (async function init() {
   trackTopbar();
+  initPageChrome();
   applyLanguage();
   try { state.user = await api("/api/auth/me", { quiet: true }); } catch (_) { state.user = null; }
   if (state.user) await startApp();

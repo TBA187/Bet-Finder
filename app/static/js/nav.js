@@ -21,6 +21,8 @@ const ICONS = {
   moon: svg('<path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/>', 17),
   collapse: svg('<path d="M15 6l-6 6 6 6"/>', 18),
   expand: svg('<path d="M9 6l6 6-6 6"/>', 18),
+  logout: svg('<path d="M10 4H5v16h5"/><path d="M14 8l4 4-4 4M18 12H9"/>'),
+  check: svg('<path d="M5 12.5l4.5 4.5L19 7.5"/>', 15),
   chevron: svg('<path d="M6 9l6 6 6-6"/>', 15),
 };
 const flag = (lang) => `<i class="flag flag-${lang}" aria-hidden="true"></i>`;
@@ -42,21 +44,42 @@ async function setTheme(theme) {
   }
 }
 
-/** Theme and language switches in the top bar. */
+/** Languages offered in the top bar; add a line here to offer another one. */
+const LANGS = [{ k: "en", short: "EN", name: "English" }, { k: "da", short: "DA", name: "Dansk" }];
+
+/** One theme button (shows the active theme, switches to the other) and one language menu. */
 function renderToggles() {
   const th = $("#themeToggle"), lg = $("#langToggle");
   if (th) {
-    const cur = currentTheme();
-    th.innerHTML = `<button type="button" data-theme-set="dark" class="${cur === "dark" ? "on" : ""}" aria-pressed="${cur === "dark"}" title="${esc(t("theme_dark"))}" aria-label="${esc(t("theme_dark"))}">${ICONS.moon}</button>
-      <button type="button" data-theme-set="light" class="${cur === "light" ? "on" : ""}" aria-pressed="${cur === "light"}" title="${esc(t("theme_light"))}" aria-label="${esc(t("theme_light"))}">${ICONS.sun}</button>`;
+    const dark = currentTheme() === "dark", tip = t(dark ? "theme_to_light" : "theme_to_dark");
+    th.innerHTML = `<span class="theme-ico">${dark ? ICONS.moon : ICONS.sun}</span>`;
+    th.title = tip; th.setAttribute("aria-label", tip);
   }
   if (lg) {
-    lg.innerHTML = [["en", "English"], ["da", "Dansk"]].map(([k, l]) => `<button type="button" data-lang-set="${k}" class="${state.lang === k ? "on" : ""}" aria-pressed="${state.lang === k}" title="${l}" aria-label="${l}">${flag(k)}</button>`).join("");
+    const cur = LANGS.find((l) => l.k === state.lang) || LANGS[0];
+    const tip = t("lang_title", { l: cur.name });
+    lg.innerHTML = `<button type="button" class="lang-btn" data-lang-open aria-haspopup="menu" aria-expanded="false" title="${esc(tip)}" aria-label="${esc(tip)}">${flag(cur.k)}<b>${cur.short}</b><span class="lang-caret">${ICONS.chevron}</span></button>
+      <div class="lang-pop" role="menu" hidden>${LANGS.map((l) => {
+        const on = l.k === cur.k, tt = t(on ? "lang_current" : "lang_switch_to", { l: l.name });
+        return `<button type="button" role="menuitemradio" aria-checked="${on}" class="${on ? "on" : ""}" data-lang-set="${l.k}" title="${esc(tt)}">${flag(l.k)}<span>${l.name}</span>${on ? ICONS.check : ""}</button>`;
+      }).join("")}</div>`;
   }
+}
+function closeLangMenu() {
+  const pop = $("#langToggle .lang-pop"), btn = $("#langToggle .lang-btn");
+  if (pop) pop.hidden = true;
+  if (btn) btn.setAttribute("aria-expanded", "false");
+}
+function toggleLangMenu() {
+  const pop = $("#langToggle .lang-pop"), btn = $("#langToggle .lang-btn");
+  if (!pop) return;
+  const open = pop.hidden;
+  pop.hidden = !open;
+  btn.setAttribute("aria-expanded", String(open));
 }
 
 // --------------------------------------------------------------- side menu
-const side = { collapsed: null, open: null, more: null };  // filled from this browser's storage on first use
+const side = { collapsed: null, open: null, more: null, spy: "", lockUntil: 0 };  // filled from this browser's storage on first use
 function sideState() {
   if (side.open === null) {
     side.open = store.get("bf_side_open", {});   // category id -> false when the person closed it
@@ -77,11 +100,12 @@ function menuModel() {
   const cats = (state.catalog && state.catalog.categories) || {};
   const catSubs = Object.entries(cats).sort((a, b) => a[1].order - b[1].order).map(([k, v]) => [`cat-${k}`, v[state.lang] || v.en]);
   const admin = can("admin");
+  // subs: [id, label]. Ids scroll to a part of the page; the scanner ones are filters instead.
   const groups = [
-    { title: "g_main", items: [
+    { title: null, items: [
       { id: "home", href: "#home", icon: ICONS.home, label: "nav_home",
         subs: [["coupons", "sm_coupons"], ["value", "sm_value"], ["errors", "sm_errors"], ["drops", "sm_drops"], ["performance", "sm_performance"]] },
-      { id: "scanner", href: "#scanner", icon: ICONS.scanner, label: "nav_scanner",
+      { id: "scanner", href: "#scanner", icon: ICONS.scanner, label: "nav_scanner", filters: true,
         subs: [["all", "sm_all_matches"], ["valueonly", "sm_value_only"], ...catSubs] },
       { id: "picks", href: "#picks", icon: ICONS.picks, label: "nav_picks", subs: [["coupons", "sm_picks_coupons"], ["singles", "sm_singles"], ["criteria", "sm_criteria"]] },
       { id: "add", href: "#add", icon: ICONS.add, label: "nav_add", perm: "manual" },
@@ -94,13 +118,16 @@ function menuModel() {
       { id: "usage", href: "#usage", icon: ICONS.usage, label: "more_usage", perm: "usage", hide: admin,
         subs: [["chain", "sm_chain"], ["providers", "sm_providers"], ["planner", "sm_planner"]] },
     ] },
-    { title: "g_admin", perm: "admin", items: [
-      { id: "admin", href: "#admin", icon: ICONS.admin, label: "nav_admin", badge: state.user && state.user.pending_requests,
-        subs: [["#users/requests", "sm_requests"], ["#users/users", "sm_accounts"], ["#users/new", "sm_new_account"], ["#users/activity", "sm_activity"],
-          ["#sources", "more_sources"], ["#usage", "more_usage"], ["#sources/providers", "sm_api_keys"], ["#sources/leagues", "sm_leagues"], ["#sources/analysis", "sm_analysis"]] },
-    ] },
     { title: "g_account", items: [
-      { id: "account", href: "#account", icon: ICONS.account, label: "more_account", subs: [["password", "sm_password"], ["profile", "sm_profile"], ["security", "sm_security"]] },
+      { id: "account", href: "#account", icon: ICONS.account, label: "nav_my_account" },
+      { id: "logout", action: "signOut", icon: ICONS.logout, label: "nav_logout" },
+    ] },
+    { title: "g_admin", perm: "admin", items: [
+      { id: "admin", href: "#admin", icon: ICONS.admin, label: "nav_admin_overview" },
+      { id: "users", href: "#users", icon: ICONS.users, label: "nav_manage_accounts", badge: state.user && state.user.pending_requests },
+      { id: "sources", href: "#sources", icon: ICONS.sources, label: "more_sources",
+        subs: [["providers", "sm_api_keys"], ["oddsopts", "s_odds_opts"], ["notify", "s_notify"], ["books", "s_books"], ["leagues", "sm_leagues"], ["analysis", "sm_analysis"]] },
+      { id: "usage", href: "#usage", icon: ICONS.usage, label: "more_usage", subs: [["chain", "sm_chain"], ["providers", "sm_providers"], ["planner", "sm_planner"]] },
     ] },
   ];
   return groups.filter((g) => !g.perm || can(g.perm))
@@ -108,16 +135,17 @@ function menuModel() {
     .filter((g) => g.items.length);
 }
 
-/** Which category and sub-item belong to the current address. */
-function activeNav() {
-  const [tab, ...rest] = (location.hash.replace(/^#/, "") || "home").split("/");
-  const sub = rest[0] || "";
-  if (tab === "match") return { cat: "scanner", sub: "" };
-  if (["users", "sources", "admin"].includes(tab) || (tab === "usage" && can("admin"))) {
-    return { cat: "admin", sub: tab === "admin" ? "" : sub ? `#${tab}/${sub}` : `#${tab}` };
-  }
-  return { cat: tab, sub };
+const hashTab = () => (location.hash.replace(/^#/, "") || "home").split("/")[0];
+/** Which menu entry belongs to the current address (the top bar and this menu share the address). */
+function activeNav() { const tab = hashTab(); return tab === "match" ? "scanner" : tab; }
+
+/** The scanner sub-entries are filters, so their highlight comes from the filter in use. */
+function scannerSub() {
+  const sc = state.scanner;
+  if (sc.category) return `cat-${sc.category}`;
+  return sc.value_only ? "valueonly" : "all";
 }
+const activeSubOf = (it) => (it.id !== activeNav() ? "" : it.filters ? (hashTab() === "scanner" ? scannerSub() : "") : side.spy);
 
 function renderSidebar() {
   const el = $("#sidebar");
@@ -128,24 +156,26 @@ function renderSidebar() {
   const act = activeNav();
   const groups = menuModel().map((g) => {
     const items = g.items.map((it) => {
-      const isActive = act.cat === it.id;
+      const isActive = act === it.id;
       const subs = it.subs || [];
       const open = subs.length && side.open[it.id] !== false;
       const all = side.more[it.id] || subs.length <= SIDE_LIMIT + 1;
       const shown = all ? subs : subs.slice(0, SIDE_LIMIT);
+      const curSub = activeSubOf(it);
       const subHtml = subs.length && open ? `<div class="side-subs">${shown.map(([k, label]) => {
-        const href = k.startsWith("#") ? k : `${it.href}/${k}`;
-        const on = isActive && act.sub === (k.startsWith("#") ? k : k);
-        const text = label.startsWith("sm_") || label.startsWith("more_") ? t(label) : label;
-        return `<a class="side-sub ${on ? "on" : ""}" href="${esc(href)}">${esc(text)}</a>`;
+        const on = curSub === k;
+        return `<a class="side-sub ${on ? "on" : ""}" href="${it.href}/${esc(k)}" data-nav-tab="${it.id}" data-${it.filters ? "filter" : "sec"}="${esc(k)}">${esc(t(label))}</a>`;
       }).join("")}${subs.length > SIDE_LIMIT + 1 ? `<button type="button" class="side-more" data-side-more="${it.id}">${esc(t(all ? "sm_show_less" : "sm_show_more", { n: subs.length - SIDE_LIMIT }))}</button>` : ""}</div>` : "";
       const badge = it.badge ? `<span class="side-badge">${esc(String(it.badge))}</span>` : "";
-      return `<div class="side-item ${isActive ? "on" : ""}"><div class="side-row">
-          <a class="side-link" href="${it.href}" title="${esc(t(it.label))}"><span class="side-icon">${it.icon}${collapsed && badge ? '<i class="side-dot"></i>' : ""}</span><span class="side-label">${esc(t(it.label))}</span>${collapsed ? "" : badge}</a>
+      const inner = `<span class="side-icon">${it.icon}${collapsed && badge ? '<i class="side-dot"></i>' : ""}</span><span class="side-label">${esc(t(it.label))}</span>${collapsed ? "" : badge}`;
+      const link = it.action
+        ? `<button type="button" class="side-link" data-action="${it.action}" title="${esc(t(it.label))}">${inner}</button>`
+        : `<a class="side-link" href="${it.href}" data-nav-tab="${it.id}" title="${esc(t(it.label))}"${isActive ? ' aria-current="page"' : ""}>${inner}</a>`;
+      return `<div class="side-item ${isActive ? "on" : ""}"><div class="side-row">${link}
           ${subs.length && !collapsed ? `<button type="button" class="side-caret ${open ? "open" : ""}" data-side-open="${it.id}" aria-expanded="${open ? "true" : "false"}" aria-label="${esc(t(open ? "sm_collapse" : "sm_expand"))}">${ICONS.chevron}</button>` : ""}
         </div>${collapsed ? "" : subHtml}</div>`;
     }).join("");
-    return `<div class="side-group"><div class="side-title">${esc(t(g.title))}</div>${items}</div>`;
+    return `<div class="side-group">${g.title ? `<div class="side-title">${esc(t(g.title))}</div>` : ""}${items}</div>`;
   }).join("");
   el.innerHTML = `<button type="button" class="side-toggle" data-side-toggle aria-label="${esc(t(collapsed ? "sm_expand_menu" : "sm_collapse_menu"))}" title="${esc(t(collapsed ? "sm_expand_menu" : "sm_collapse_menu"))}">
       ${collapsed ? ICONS.expand : ICONS.collapse}<span class="side-label">${esc(t("sm_collapse_menu"))}</span></button><nav aria-label="${esc(t("sm_menu"))}">${groups}</nav>`;
@@ -164,13 +194,21 @@ document.addEventListener("click", (e) => {
   if (op) { const id = op.dataset.sideOpen; side.open[id] = side.open[id] === false; store.set("bf_side_open", side.open); renderSidebar(); return; }
   const mo = e.target.closest("[data-side-more]");
   if (mo) { const id = mo.dataset.sideMore; side.more[id] = !side.more[id]; store.set("bf_side_more", side.more); renderSidebar(); return; }
-  const th = e.target.closest("[data-theme-set]");
-  if (th) { setTheme(th.dataset.themeSet); return; }
+  if (e.target.closest("[data-theme-toggle]")) { setTheme(currentTheme() === "dark" ? "light" : "dark"); return; }
+  if (e.target.closest("[data-lang-open]")) { toggleLangMenu(); return; }
   const lg = e.target.closest("[data-lang-set]");
-  if (lg && lg.dataset.langSet !== state.lang) { setLanguage(lg.dataset.langSet); return; }
-  // on phones the opened menu covers the page: close it after choosing a page
-  if (e.target.closest("#sidebar a") && isNarrow() && !sideCollapsed()) setSideCollapsed(true);
+  if (lg) { closeLangMenu(); if (lg.dataset.langSet !== state.lang) setLanguage(lg.dataset.langSet); return; }
+  closeLangMenu();
+  // a menu entry for the page we are already on never reloads it: it scrolls (or filters) in place
+  const a = e.target.closest("#sidebar a[data-nav-tab]");
+  if (a && a.dataset.navTab === hashTab()) {
+    e.preventDefault();
+    if (a.dataset.filter) { applyScannerFilter(a.dataset.filter); history.replaceState(null, "", "#scanner"); route(); }
+    else if (a.dataset.sec) { scrollToSec(a.dataset.sec); history.replaceState(null, "", `#${a.dataset.navTab}/${a.dataset.sec}`); }
+    else window.scrollTo({ top: 0, behavior: "smooth" });
+  }
 });
+document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeLangMenu(); });
 
 /** Keeps the side menu just below the top bar, whatever height the bar has. */
 function trackTopbar() {
@@ -180,6 +218,18 @@ function trackTopbar() {
   if (window.ResizeObserver) new ResizeObserver(set).observe(bar);
   window.addEventListener("resize", set);
 }
+const topbarH = () => parseInt(getComputedStyle(document.documentElement).getPropertyValue("--topbar-h"), 10) || 70;
+
+/** Smooth-scroll to a part of the current page (sections are the elements with id "sec-<name>"). */
+function scrollToSec(name) {
+  const el = document.getElementById(`sec-${name}`);
+  if (!el) return false;
+  side.lockUntil = Date.now() + 900;           // keep the clicked entry highlighted while the page glides there
+  setSpy(name);
+  setTimeout(updateSpy, 950);
+  window.scrollTo({ top: Math.max(0, el.getBoundingClientRect().top + window.scrollY - topbarH() - 12), behavior: "smooth" });
+  return true;
+}
 
 /** After a page renders, jump to the part chosen in the side menu (e.g. #home/value). */
 function scrollToSection(name, token) {
@@ -187,13 +237,49 @@ function scrollToSection(name, token) {
   let tries = 0;
   const look = () => {
     if (token !== state.routeToken) return;
-    const el = document.getElementById(`sec-${name}`);
-    if (el) {
-      const top = el.getBoundingClientRect().top + window.scrollY - (parseInt(getComputedStyle(document.documentElement).getPropertyValue("--topbar-h"), 10) || 70) - 12;
-      window.scrollTo({ top, behavior: "smooth" });
-    } else if (tries++ < 40) setTimeout(look, 100);
+    if (!scrollToSec(name) && tries++ < 40) setTimeout(look, 100);
   };
   look();
+}
+
+// ----------------------------------------------- highlight the part being read
+function setSpy(name) {
+  if (side.spy === name) return;
+  side.spy = name;
+  const act = activeNav();
+  $$("#sidebar a.side-sub[data-sec]").forEach((a) => a.classList.toggle("on", a.dataset.navTab === act && a.dataset.sec === name));
+}
+function updateSpy() {
+  spyQueued = false;
+  if (Date.now() < side.lockUntil) return;
+  const secs = $$('#view [id^="sec-"]');
+  let cur = "";
+  if (secs.length) {
+    const line = topbarH() + 70;
+    secs.forEach((s) => { if (s.getBoundingClientRect().top <= line) cur = s.id.slice(4); });
+    const atBottom = window.scrollY > 0 && window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 4;
+    if (atBottom) cur = secs[secs.length - 1].id.slice(4);
+  }
+  setSpy(cur);
+}
+let spyQueued = false;
+function queueSpy() { if (!spyQueued) { spyQueued = true; requestAnimationFrame(updateSpy); } }
+
+// ---------------------------------------------------------- back to top button
+function initPageChrome() {
+  const btn = document.createElement("button");
+  btn.type = "button"; btn.className = "to-top"; btn.id = "toTop";
+  btn.innerHTML = svg('<path d="M6 14l6-6 6 6"/>', 18);
+  const setLabel = () => { btn.title = t("to_top"); btn.setAttribute("aria-label", t("to_top")); };
+  setLabel();
+  btn.addEventListener("click", () => window.scrollTo({ top: 0, behavior: "smooth" }));
+  document.body.appendChild(btn);
+  const onScroll = () => { btn.classList.toggle("show", window.scrollY > 420); queueSpy(); };
+  window.addEventListener("scroll", onScroll, { passive: true });
+  window.addEventListener("resize", queueSpy);
+  new MutationObserver(queueSpy).observe($("#view"), { childList: true, subtree: true });
+  document.addEventListener("bf-lang", setLabel);
+  onScroll();
 }
 
 // -------------------------------------------------------------- admin page

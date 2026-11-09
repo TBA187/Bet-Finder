@@ -19,7 +19,7 @@
   <header class="topbar">
     <a class="brand" href="#home" aria-label="BetFinder">
       <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5" fill="none" stroke="currentColor" stroke-width="2.2"/><path d="M15.5 15.5 21 21" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/><path d="M7.5 11.5l2 2 4-5" fill="none" stroke="var(--accent)" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-      <span>BetFinder</span>
+      <span class="brand-text">BetFinder</span>
     </a>
     <nav class="topnav" aria-label="Main">
       <a href="#home" data-tab="home"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 11l8-7 8 7v9h-5v-6H9v6H4z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg><span>Dashboard</span></a>
@@ -30,8 +30,8 @@
     </nav>
     <div class="top-actions">
       <button id="sourcePill" class="pill" type="button">…</button>
-      <div id="themeToggle" class="mini-toggle" role="group" aria-label="Theme"></div>
-      <div id="langToggle" class="mini-toggle" role="group" aria-label="Language"></div>
+      <button id="themeToggle" class="icon-btn theme-btn" type="button" data-theme-toggle></button>
+      <div id="langToggle" class="lang-menu"></div>
       <button id="userBtn" class="icon-btn" type="button" aria-label="My account"></button>
       <button id="refreshBtn" class="icon-btn" type="button" aria-label="Refresh odds data" title="Refresh">
         <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.34-5.66M20 4v5h-5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
