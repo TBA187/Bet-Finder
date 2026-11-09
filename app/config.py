@@ -15,7 +15,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from app.core.odds_math import DEVIG_METHODS
 from app.storage.json_store import JsonStore
 
-APP_VERSION = "1.1.0"
+APP_VERSION = "1.2.0"
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 RISK_LEVELS = ("low", "medium", "high", "very_high")
@@ -34,6 +34,8 @@ class Paths:
 
 # key -> (default, validator spec)
 _SPEC: dict[str, tuple[Any, dict]] = {
+    "language": ("en", {"type": str, "choices": ("en", "da")}),
+    "currency": ("DKK", {"type": str, "choices": ("DKK", "EUR", "SEK", "NOK", "GBP", "USD")}),
     "timezone": ("Europe/Copenhagen", {"type": "tz"}),
     "day_end_hour": (6, {"type": int, "min": 0, "max": 12}),
     "lookahead_hours": (48, {"type": int, "min": 6, "max": 168}),
@@ -53,7 +55,10 @@ _SPEC: dict[str, tuple[Any, dict]] = {
     # Daily picks
     "coupon_min_odds": (3.0, {"type": float, "min": 1.5, "max": 50.0}),
     "coupon_max_legs": (3, {"type": int, "min": 1, "max": 3}),
-    "max_coupons": (2, {"type": int, "min": 1, "max": 2}),
+    "max_coupons": (3, {"type": int, "min": 1, "max": 5}),
+    # Price deviation traffic light (price vs margin-free fair odds)
+    "deviation_warning_pct": (5.0, {"type": float, "min": 1.0, "max": 50.0}),
+    "deviation_alert_pct": (10.0, {"type": float, "min": 2.0, "max": 100.0}),
     # Model blending
     "model_weight": (0.30, {"type": float, "min": 0.0, "max": 0.6}),
     "max_logit_shift": (0.30, {"type": float, "min": 0.0, "max": 1.0}),
@@ -64,17 +69,44 @@ _SPEC: dict[str, tuple[Any, dict]] = {
     "my_bookmakers": ([], {"type": list}),
     # Providers
     "odds_api_key": ("", {"type": str, "secret": True}),
-    "odds_api_regions": (["eu"], {"type": list, "choices": ("eu", "uk", "se", "us", "au", "fr", "us2")}),
+    "odds_api_regions": (["eu"], {"type": list, "choices": ("eu", "uk", "se", "fr", "us", "us2", "au")}),
     "odds_api_markets": (["h2h", "totals"], {"type": list, "choices": ("h2h", "totals", "spreads")}),
     "api_sports_key": ("", {"type": str, "secret": True}),
     "api_sports_max_requests_per_refresh": (60, {"type": int, "min": 1, "max": 5000}),
     "api_sports_daily_reserve": (5, {"type": int, "min": 0, "max": 1000}),
+    "api_sports_fetch_xg": (True, {"type": bool}),
+    # odds-api.io (paid): the only feed found that carries Danske Spil and Eurobet
+    "odds_api_io_key": ("", {"type": str, "secret": True}),
+    "odds_api_io_bookmakers": (["DanskeSpil", "Eurobet IT"], {"type": list}),
+    # OddsPapi (free 250 requests/month): extra bookmakers on demand
+    "oddspapi_key": ("", {"type": str, "secret": True}),
+    "oddspapi_bookmakers": (["bet365", "pinnacle", "unibet", "williamhill", "betway", "1xbet", "eurobet"], {"type": list}),
+    "oddspapi_monthly_budget": (240, {"type": int, "min": 0, "max": 100000}),
+    # Scraping fallback (polite: robots.txt, rate limited, never bypasses blocking)
+    "scraper_mode": ("fallback", {"type": str, "choices": ("off", "fallback", "always")}),
+    "scraper_kambi_operators": (["ub"], {"type": list}),
+    "scraper_kambi_market": ("DK", {"type": str}),
+    "scraper_min_interval_seconds": (5, {"type": int, "min": 2, "max": 600}),
+    # Scheduler
     "auto_refresh_minutes": (0, {"type": int, "min": 0, "max": 1440}),
+    "active_hours_start": (8, {"type": int, "min": 0, "max": 23}),
+    "active_hours_end": (24, {"type": int, "min": 1, "max": 24}),
+    # Notifications (Telegram / ntfy)
+    "notify_telegram_token": ("", {"type": str, "secret": True}),
+    "notify_telegram_chat_id": ("", {"type": str}),
+    "notify_ntfy_topic": ("", {"type": str}),
+    "notify_ntfy_server": ("https://ntfy.sh", {"type": str, "url": True}),
+    "notify_on_errors": (True, {"type": bool}),
+    "notify_on_value": (True, {"type": bool}),
+    "notify_on_picks": (True, {"type": bool}),
+    "notify_on_arbitrage": (True, {"type": bool}),
+    "notify_min_ev_pct": (6.0, {"type": float, "min": 0.0, "max": 100.0}),
     "demo_mode": (False, {"type": bool}),
     "retention_days": (21, {"type": int, "min": 2, "max": 365}),
 }
 
-SECRET_ENV = {"odds_api_key": "ODDS_API_KEY", "api_sports_key": "API_SPORTS_KEY"}
+SECRET_ENV = {"odds_api_key": "ODDS_API_KEY", "api_sports_key": "API_SPORTS_KEY", "odds_api_io_key": "ODDS_API_IO_KEY",
+              "oddspapi_key": "ODDSPAPI_KEY", "notify_telegram_token": "TELEGRAM_BOT_TOKEN"}
 
 DEFAULT_SETTINGS = {k: v[0] for k, v in _SPEC.items()}
 
@@ -120,6 +152,10 @@ def _coerce(key: str, value: Any) -> Any:
         raise SettingsError(f"{key} must be <= {spec['max']}")
     if kind is str:
         coerced = coerced.strip()
+        if spec.get("url") and coerced and not coerced.startswith(("https://", "http://")):
+            raise SettingsError(f"{key} must start with https://")
+        if len(coerced) > 300:
+            raise SettingsError(f"{key} is too long")
     return coerced
 
 

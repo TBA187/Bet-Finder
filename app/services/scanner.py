@@ -18,6 +18,7 @@ from typing import Optional
 from app.core.markets import market_label, parse_market_id, selection_label, selections_for
 from app.core.models import Fixture, Quote
 from app.core.odds_math import arbitrage_percent, devig, margin_percent, normalise
+from app.i18n import lang_of
 from app.services.registry import Registry
 
 SHARP_WEIGHT = {"sharp": 1.0, "exchange": 0.8}
@@ -107,6 +108,8 @@ def compare_market(fixture: Fixture, mid: str, books: dict[str, dict[str, Quote]
                 flags.append("stale")
             if q.source == "manual":
                 flags.append("manual")
+            if q.source == "scraper":
+                flags.append("scraped")
             view = {
                 "bookmaker": bk,
                 "name": registry.bookmaker_name(bk),
@@ -141,9 +144,10 @@ def compare_market(fixture: Fixture, mid: str, books: dict[str, dict[str, Quote]
         "market_id": mid,
         "market": market,
         "line": line,
-        "label": market_label(fixture.sport, market, line),
+        "label": market_label(fixture.sport, market, line, lang_of(settings)),
         "selections": list(sels),
-        "selection_labels": {s: selection_label(fixture.sport, market, line, s, fixture.home, fixture.away) for s in sels},
+        "selection_labels": {s: selection_label(fixture.sport, market, line, s, fixture.home, fixture.away, lang_of(settings))
+                             for s in sels},
         "books": sorted(book_rows, key=lambda r: (r["type"] not in ("sharp", "exchange"), r["name"].lower())),
         "consensus": consensus,
         "best": best,

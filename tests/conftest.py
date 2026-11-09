@@ -54,6 +54,8 @@ def client(paths, monkeypatch):
     monkeypatch.delenv("API_SPORTS_KEY", raising=False)
     app = create_app(paths, background=False)
     with TestClient(app) as c:
+        # tests must never reach the internet: no scraping fallback
+        c.put("/api/settings", json={"scraper_mode": "off"})
         yield c
 
 

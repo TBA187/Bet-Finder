@@ -285,3 +285,39 @@ label.f { display: block; font-size: 0.8rem; color: var(--muted); margin-bottom:
 .skeleton + .skeleton { margin-top: 10px; }
 @keyframes shimmer { to { background-position: -200% 0; } }
 .footer-note { color: var(--faint); font-size: 0.74rem; text-align: center; margin-top: 26px; line-height: 1.6; }
+
+/* ---------------- v1.2 additions ---------------- */
+.icon-btn.lang { width: auto; padding: 0 10px; font-size: 0.8rem; font-weight: 700; }
+.pill.orange { color: var(--orange); border-color: color-mix(in srgb, var(--orange) 45%, var(--line)); }
+.dot.scraped { background: var(--orange); }
+.chip .light { width: 7px; height: 7px; border-radius: 50%; display: inline-block; }
+.light.warning { background: var(--amber); }
+.light.alert { background: var(--red); }
+.headline.unsure { background: var(--amber-soft); border-color: color-mix(in srgb, var(--amber) 30%, transparent); }
+.card.compact { padding: 11px 13px; }
+.click-row { cursor: pointer; }
+.click-row:hover { background: var(--card-2); }
+a.tile { color: var(--text); display: block; transition: border-color 0.15s; }
+a.tile:hover { border-color: color-mix(in srgb, var(--blue) 45%, var(--line)); }
+.tile.static { padding: 9px 11px; }
+.v.neg-red { color: var(--red); }
+.status-strip { padding: 10px 13px; }
+.grid-coupons { display: grid; gap: 8px; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); }
+.coupon-mini { color: var(--text); border-color: color-mix(in srgb, var(--accent) 35%, var(--line)); }
+.coupon-mini .big { font-size: 1.3rem; font-weight: 800; }
+.menu-item { display: flex; align-items: center; gap: 12px; color: var(--text); }
+.menu-item > div { flex: 1; min-width: 0; }
+.menu-item .mi { font-size: 1.35rem; width: 32px; text-align: center; }
+.cat-title { font-size: 0.82rem; font-weight: 700; color: var(--text); margin: 14px 0 8px; }
+.agent.dim { opacity: 0.7; }
+.meter.wide { width: 100%; height: 6px; margin-top: 8px; }
+.usage-bar { height: 8px; background: var(--card-2); border-radius: 99px; overflow: hidden; }
+.usage-bar > i { display: block; height: 100%; background: var(--accent); border-radius: 99px; }
+.usage-bar.warm > i { background: var(--amber); }
+.usage-bar.hot > i { background: var(--red); }
+.err-text { color: var(--red); white-space: normal !important; }
+.price-row { border: 1px solid var(--line); border-radius: 12px; padding: 10px; background: var(--card); }
+.price-row + .price-row { margin-top: 10px; }
+textarea.paste { margin-top: 8px; resize: vertical; min-height: 40px; font-size: 14px; }
+details.market .list-row:first-of-type { border-top: 1px solid var(--line); }
+@media (max-width: 380px) { .tabbar a { font-size: 0.62rem; } }

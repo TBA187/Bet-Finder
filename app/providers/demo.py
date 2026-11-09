@@ -29,6 +29,9 @@ _FIXTURES = [
     ("basketball", "demo.basketball", "Demo Basketball League", "Ironvale Titans", "Summit Hawks", {"mu": -2.0, "total": 158.0, "sd_m": 11.5, "sd_t": 15.5}, 6, {}),
     ("handball", "demo.handball", "Demo Handball Cup", "Nordvik HK", "Aurora HC", {"mu": 2.0, "total": 58.0, "sd_m": 5.8, "sd_t": 6.2}, 3, {"misprice": ("h2h", None, "home", 0.09, "demo_book_d")}),
     ("handball", "demo.handball", "Demo Handball Cup", "Valemark HB", "Fjordby", {"mu": -1.0, "total": 56.0, "sd_m": 5.8, "sd_t": 6.2}, 5, {"suspension": True}),
+    ("icehockey", "demo.icehockey", "Demo Hockey League", "Frostvik Wolves", "Granholm Bears", {"lh": 3.3, "la": 2.6}, 4, {"misprice": ("totals", 5.5, "over", 0.09, "demo_book_e")}),
+    ("mma", "demo.mma", "Demo Fight Night", "R. Stonewall", "K. Ashby", {"s": 0.75, "d": 0.0}, 5, {"misprice": ("h2h", None, "away", 0.11, "demo_book_a")}),
+    ("tennis", "demo.tennis", "Demo Open", "L. Marchetti", "S. Okafor", {"s": -0.40, "d": 0.0}, 3, {}),
 ]
 
 
@@ -67,11 +70,14 @@ def load_demo(repo: Repository, registry: Registry, now: datetime) -> int:
                      home=home, away=away, kickoff=kickoff, is_demo=True, refs={"demo": f"{home}-{away}"})
         repo.save_fixture(fx)
         model = model_for(sport)
-        mids = ["h2h", market_id("totals", 2.5 if sport == "football" else round(theta.get("total", 0) - 0.5) + 0.5)]
         if sport == "football":
-            mids.append("btts")
+            mids = ["h2h", market_id("totals", 2.5), "btts"]
+        elif sport == "icehockey":
+            mids = ["h2h", market_id("totals", 5.5), market_id("spreads", -1.5)]
+        elif "mu" in theta:
+            mids = ["h2h", market_id("totals", round(theta["total"] - 0.5) + 0.5), market_id("spreads", -round(theta["mu"] - 0.5) - 0.5)]
         else:
-            mids.append(market_id("spreads", -round(theta["mu"] - 0.5) - 0.5))
+            mids = ["h2h"]
         quotes = []
         for mid in mids:
             market, line = (mid.split("@")[0], float(mid.split("@")[1])) if "@" in mid else (mid, None)
@@ -95,7 +101,10 @@ def load_demo(repo: Repository, registry: Registry, now: datetime) -> int:
         # statistics consistent with the true parameters, with noise
         # Team averages that roughly reproduce the true parameters (venue split
         # removed first so the statistical model is not biased toward home).
-        if sport == "football":
+        if "s" in theta:
+            count += 1  # individual sports: no team statistics feed
+            continue
+        if "lh" in theta:
             split, games = 0.10, 7
             att_h, def_h = theta["lh"] / (1 + split), theta["la"] / (1 - split)
             att_a, def_a = theta["la"] / (1 - split), theta["lh"] / (1 + split)
@@ -109,7 +118,7 @@ def load_demo(repo: Repository, registry: Registry, now: datetime) -> int:
         repo.save_team_stats(f"demo:{cid}:{away}", _stats(rng, away, jitter(att_a), jitter(def_a), games, split))
         meetings = []
         for i in range(4):
-            if sport == "football":
+            if "lh" in theta:
                 h, a = max(0, round(rng.gauss(theta["lh"], 1))), max(0, round(rng.gauss(theta["la"], 1)))
             else:
                 h = round(theta["total"] / 2 + theta["mu"] / 2 + rng.gauss(0, theta["sd_m"] / 2))

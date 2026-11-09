@@ -12,7 +12,7 @@ import re
 from pathlib import Path
 from typing import Optional
 
-from app.core.markets import SPORTS
+from app.core.sports import SPORTS
 from app.storage.json_store import JsonStore
 
 log = logging.getLogger("betfinder.registry")
@@ -50,8 +50,9 @@ class Registry:
                 self._alias[_norm(alias)] = b["key"]
             for i, okey in enumerate(b.get("sources", {}).get("the_odds_api", []) or []):
                 self._odds_api[okey] = (b["key"], i)
-            for name in b.get("sources", {}).get("api_sports", []) or []:
-                self._alias[_norm(name)] = b["key"]
+            for src in ("api_sports", "odds_api_io", "oddspapi"):
+                for name in b.get("sources", {}).get(src, []) or []:
+                    self._alias[_norm(name)] = b["key"]
 
     def _load(self, path: Path, field: str) -> list[dict]:
         try:

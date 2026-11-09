@@ -1,0 +1,29 @@
+# Live deployment: BetFinder + Caddy (automatic HTTPS certificate).
+# 1. Point a domain (e.g. bets.example.com) at the server's IP.
+# 2. cp .env.example .env  and fill it in.
+# 3. docker compose up -d
+services:
+  betfinder:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    volumes:
+      - betfinder-data:/app/data/runtime
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      - DOMAIN=${DOMAIN}
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+    depends_on:
+      - betfinder
+
+volumes:
+  betfinder-data:
+  caddy-data:

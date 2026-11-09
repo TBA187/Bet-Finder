@@ -7,6 +7,7 @@ skips competitions that are out of season.
 """
 from __future__ import annotations
 
+import fnmatch
 import logging
 from datetime import datetime, timedelta, timezone
 from typing import Optional
@@ -16,6 +17,7 @@ import httpx
 from app.core.markets import market_id, normalise_line, swap_sides
 from app.core.models import Fixture, Quote
 from app.core.names import team_similarity
+from app.core.sports import has_draw
 from app.providers.http import CachedClient, ProviderError
 from app.services.registry import Registry
 from app.services.repository import Repository
@@ -65,39 +67,70 @@ class TheOddsApiProvider:
         regions = ",".join(self.settings.get("odds_api_regions") or ["eu"])
         markets = ",".join(self.settings.get("odds_api_markets") or ["h2h"])
         horizon = now + timedelta(hours=int(self.settings.get("lookahead_hours", 48)))
+        summary["exhausted"] = False
         for comp in competitions:
-            sport_key = comp.get("providers", {}).get("the_odds_api")
-            if not sport_key:
+            pattern = comp.get("providers", {}).get("the_odds_api")
+            if not pattern:
                 continue
-            if sport_key not in active:
+            # wildcard keys (e.g. tennis_atp_*) expand to the tournaments that are currently active
+            keys = sorted(k for k in active if fnmatch.fnmatch(k, pattern)) if "*" in pattern else [pattern]
+            if not keys or (keys == [pattern] and pattern not in active):
                 summary["skipped"].append(f"{comp['name']}: not in season at The Odds API")
                 continue
-            params = {"apiKey": self.key, "regions": regions, "markets": markets, "oddsFormat": "decimal",
-                      "dateFormat": "iso", "commenceTimeFrom": _iso(now), "commenceTimeTo": _iso(horizon)}
-            try:
-                events = await cc.get_json(f"{BASE}/sports/{sport_key}/odds", params=params, ttl_seconds=600)
-            except ProviderError as exc:
-                summary["errors"].append(f"{comp['name']}: {exc}")
-                continue
-            if not isinstance(events, list):
-                summary["errors"].append(f"{comp['name']}: unexpected response")
-                continue
-            for ev in events:
+            for sport_key in keys:
+                if self._credits_low(cc):
+                    summary["exhausted"] = True
+                    summary["skipped"].append(f"{comp['name']}: The Odds API credits used up")
+                    break
+                window = {"commenceTimeFrom": _iso(now), "commenceTimeTo": _iso(horizon)}
                 try:
-                    n = self._ingest(ev, comp, now)
-                except Exception as exc:  # one malformed event must not stop the refresh
-                    log.warning("Skipping event %s: %s", ev.get("id") if isinstance(ev, dict) else "?", exc)
+                    # the events list is free: only spend credits when there are matches in the window
+                    upcoming = await cc.get_json(f"{BASE}/sports/{sport_key}/events",
+                                                 params={"apiKey": self.key, "dateFormat": "iso", **window}, ttl_seconds=1800)
+                except ProviderError as exc:
+                    summary["errors"].append(f"{comp['name']}: {exc}")
                     continue
-                if n is not None:
-                    summary["fixtures"] += 1
-                    summary["quotes"] += n
+                if not upcoming:
+                    summary["skipped"].append(f"{comp['name']} ({sport_key}): no matches in the window")
+                    continue
+                params = {"apiKey": self.key, "regions": regions, "markets": markets, "oddsFormat": "decimal",
+                          "dateFormat": "iso", **window}
+                try:
+                    events = await cc.get_json(f"{BASE}/sports/{sport_key}/odds", params=params, ttl_seconds=600)
+                except ProviderError as exc:
+                    summary["errors"].append(f"{comp['name']}: {exc}")
+                    if "401" in str(exc) or "quota" in str(exc).lower() or "429" in str(exc):
+                        summary["exhausted"] = True
+                    continue
+                if not isinstance(events, list):
+                    summary["errors"].append(f"{comp['name']}: unexpected response")
+                    continue
+                for ev in events:
+                    try:
+                        n = self._ingest(ev, comp, now)
+                    except Exception as exc:  # one malformed event must not stop the refresh
+                        log.warning("Skipping event %s: %s", ev.get("id") if isinstance(ev, dict) else "?", exc)
+                        continue
+                    if n is not None:
+                        summary["fixtures"] += 1
+                        summary["quotes"] += n
         summary["results"] = await self._scores(cc, competitions, now, summary)
         status = {"last_ok": now.isoformat()} if not summary["errors"] else {"last_error": summary["errors"][-1], "last_error_at": now.isoformat()}
         if cc.last_headers.get("x-requests-remaining") is not None:
             status["remaining"] = cc.last_headers.get("x-requests-remaining")
             status["used"] = cc.last_headers.get("x-requests-used")
+        status["exhausted"] = summary["exhausted"]
         self.repo.update_provider_status(NAME, **status)
         return summary
+
+    def _credits_low(self, cc: CachedClient) -> bool:
+        remaining = cc.last_headers.get("x-requests-remaining")
+        if remaining is None:
+            remaining = self.repo.provider_status().get(NAME, {}).get("remaining")
+        try:
+            return remaining is not None and float(remaining) < 5
+        except (TypeError, ValueError):
+            return False
 
     # ------------------------------------------------------------------
     def _ingest(self, ev: dict, comp: dict, now: datetime) -> Optional[int]:
@@ -167,8 +200,12 @@ class TheOddsApiProvider:
                     out.append(("spreads", normalise_line(point), "home", price))
                 elif side == "away":
                     out.append(("spreads", normalise_line(-float(point)), "away", price))
-        if key == "h2h" and sport != "basketball" and len(out) == 2 and all(o[2] != "draw" for o in out):
-            out = [("dnb", None, o[2], o[3]) for o in out]  # 2-way football/handball market = draw no bet
+        if key == "h2h":
+            has_draw_outcome = any(o[2] == "draw" for o in out)
+            if has_draw(sport) and not has_draw_outcome and len(out) == 2:
+                out = [("dnb", None, o[2], o[3]) for o in out]  # 2-way football/handball market = draw no bet
+            elif not has_draw(sport) and has_draw_outcome:
+                out = [("h2h3", None, o[2], o[3]) for o in out]  # e.g. boxing priced with the draw
         return out
 
     async def _scores(self, cc: CachedClient, competitions: list[dict], now: datetime, summary: dict) -> int:

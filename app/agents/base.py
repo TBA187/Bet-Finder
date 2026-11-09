@@ -21,6 +21,7 @@ from datetime import datetime
 from typing import Any, Optional
 
 from app.core.models import Absence, Fixture, LineupInfo, TeamStats
+from app.i18n import lang_of, tr
 
 
 @dataclass
@@ -71,6 +72,13 @@ class AnalysisContext:
         return self.fixture.sport
 
     @property
+    def lang(self) -> str:
+        return lang_of(self.settings)
+
+    def t(self, key: str, **values) -> str:
+        return tr(self.lang, key, **values)
+
+    @property
     def hours_to_kickoff(self) -> float:
         return (self.fixture.kickoff - self.now).total_seconds() / 3600.0
 
@@ -97,8 +105,9 @@ class Agent:
         try:
             rep = self.run(ctx)
         except Exception as exc:  # one failing agent must never break the analysis
-            return self.report(status="error", summary=f"Agent failed: {type(exc).__name__}: {exc}",
-                               warnings=["This agent crashed; its view is ignored and confidence lowered."])
+            rep = self.report(status="error", summary=ctx.t("agent_failed", err=f"{type(exc).__name__}: {exc}"),
+                              warnings=[ctx.t("agent_failed_warn")])
+        rep.name = tr(ctx.lang, f"agent_{self.key}")
         rep.confidence = max(0.0, min(1.0, rep.confidence))
         rep.lean_home = max(-1.0, min(1.0, rep.lean_home))
         rep.lean_total = max(-1.0, min(1.0, rep.lean_total))
@@ -112,19 +121,26 @@ def squash(x: float, scale: float = 1.0) -> float:
     return math.tanh(x / scale) if scale else 0.0
 
 
+_MARGIN_SCALE = {"football": 0.6, "icehockey": 0.8, "basketball": 6.0, "handball": 2.5,
+                 "americanfootball": 7.0, "baseball": 1.5, "mma": 0.6, "boxing": 0.6, "tennis": 0.6}
+_TOTAL_SCALE = {"football": 0.6, "icehockey": 0.8, "basketball": 8.0, "handball": 3.0,
+                "americanfootball": 8.0, "baseball": 1.8, "mma": 1.0, "boxing": 1.0, "tennis": 3.0}
+
+
 def margin_scale(sport: str) -> float:
-    """Typical meaningful margin difference per sport (goals/points)."""
-    return {"football": 0.6, "basketball": 6.0, "handball": 2.5}.get(sport, 1.0)
+    """Typical meaningful margin difference per sport (goals/points/log-odds)."""
+    return _MARGIN_SCALE.get(sport, 1.0)
 
 
 def total_scale(sport: str) -> float:
-    return {"football": 0.6, "basketball": 8.0, "handball": 3.0}.get(sport, 1.0)
+    return _TOTAL_SCALE.get(sport, 1.0)
 
 
 def result_points(sport: str, scored: float, conceded: float) -> float:
-    """Points for a result, scaled 0..1 (win=1, draw=1/3 for football/handball)."""
+    """Points for a result, scaled 0..1 (win=1; draw=1/3 where draws exist)."""
+    from app.core.sports import has_draw
     if scored > conceded:
         return 1.0
     if scored == conceded:
-        return 1.0 / 3.0 if sport != "basketball" else 0.5
+        return 1.0 / 3.0 if has_draw(sport) else 0.5
     return 0.0

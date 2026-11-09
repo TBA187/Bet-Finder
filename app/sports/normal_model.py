@@ -115,14 +115,14 @@ class NormalScoreModel(SportModel):
         avg_team = float(self.params["avg_total"]) / 2
         ha = 0.0 if self.params.get("neutral") else float(self.params["home_adv"])
         prior_home, prior_away = avg_team + ha / 2, avg_team - ha / 2
-        notes: list[str] = []
+        notes: list[tuple] = []
         if home.scored_home is not None and away.scored_away is not None and home.games_home >= 2 and away.games_away >= 2:
             h_for = shrink(home.scored_home, home.games_home, prior_home, 5)
             h_against = shrink(home.conceded_home, home.games_home, prior_away, 5)
             a_for = shrink(away.scored_away, away.games_away, prior_away, 5)
             a_against = shrink(away.conceded_away, away.games_away, prior_home, 5)
             n = min(home.games_home, away.games_away)
-            notes.append("Venue-specific scoring averages")
+            notes.append(("note_venue_scoring", {}))
         else:
             sh, ch, sa, ca = home.overall("scored"), home.overall("conceded"), away.overall("scored"), away.overall("conceded")
             if None in (sh, ch, sa, ca) or home.games < 3 or away.games < 3:
@@ -132,13 +132,13 @@ class NormalScoreModel(SportModel):
             a_for = shrink(sa, away.games, avg_team, 5) - ha / 4
             a_against = shrink(ca, away.games, avg_team, 5) + ha / 4
             n = min(home.games, away.games) // 2
-            notes.append("Overall scoring averages (no venue split)")
+            notes.append(("note_overall_scoring", {}))
         exp_home = (h_for + a_against) / 2
         exp_away = (a_for + h_against) / 2
         theta = {"mu": round(exp_home - exp_away, 3), "total": round(exp_home + exp_away, 3),
                  "sd_m": float(self.params["sd_m"]), "sd_t": float(self.params["sd_t"])}
         confidence = clamp(0.25 + 0.5 * min(n, 12) / 12, 0.0, 0.75)
-        notes.append(f"Expected score {exp_home:.1f} - {exp_away:.1f} (sample {n} games per side)")
+        notes.append(("note_expected_score", {"home": f"{exp_home:.1f}", "away": f"{exp_away:.1f}", "n": n}))
         return theta, confidence, notes
 
     def blend(self, market, model, weight):
@@ -151,14 +151,12 @@ class NormalScoreModel(SportModel):
         return {**theta, "mu": theta["mu"] + home_units, "total": max(1.0, theta["total"] + total_units)}
 
     def describe(self, theta):
-        unit = "points" if self.sport == "basketball" else "goals"
-        return {
+        return {"kind": "score",
             "expected_home": round((theta["total"] + theta["mu"]) / 2, 1),
             "expected_away": round((theta["total"] - theta["mu"]) / 2, 1),
             "expected_total": round(theta["total"], 1),
             "expected_margin": round(theta["mu"], 1),
             "margin_sd": round(theta["sd_m"], 2),
-            "unit": unit,
         }
 
     def expected_margin(self, theta: dict) -> float:
@@ -189,3 +187,25 @@ class HandballModel(NormalScoreModel):
     def default_params(self) -> dict:
         return {"avg_total": 57.0, "home_adv": 1.8, "sd_m": 5.8, "sd_t": 6.2,
                 "sd_m_bounds": (3.8, 9.0), "fit_sd": True, "neutral": False}
+
+
+class AmericanFootballModel(NormalScoreModel):
+    sport = "americanfootball"
+    has_draw_in_h2h = False
+    units_home = 3.0
+    units_total = 4.0
+
+    def default_params(self) -> dict:
+        return {"avg_total": 45.0, "home_adv": 1.8, "sd_m": 13.5, "sd_t": 13.0,
+                "sd_m_bounds": (9.0, 18.0), "fit_sd": False, "neutral": False}
+
+
+class BaseballModel(NormalScoreModel):
+    sport = "baseball"
+    has_draw_in_h2h = False
+    units_home = 0.5
+    units_total = 0.8
+
+    def default_params(self) -> dict:
+        return {"avg_total": 8.8, "home_adv": 0.25, "sd_m": 4.3, "sd_t": 4.4,
+                "sd_m_bounds": (3.0, 6.0), "fit_sd": False, "neutral": False}

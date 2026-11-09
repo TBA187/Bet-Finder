@@ -1,85 +1,1641 @@
 {
-  "_comment": "Competition registry. Add a competition by adding an entry. Nothing else in the code needs to change. 'providers.the_odds_api' is The Odds API sport key. 'providers.api_sports' is either {\"league\": <id>} or {\"names\": [...], \"country\": \"...\"}, which is resolved automatically through the provider's /leagues endpoint. 'params' overrides the sport model defaults.",
-  "excluded_by_request": [
-    "Danish Superliga (football)",
-    "Spanish La Liga (football)",
-    "Swedish Allsvenskan (football)",
-    "Danish, Spanish and Swedish domestic handball/basketball leagues"
-  ],
-  "competitions": [
-    {"id": "football.epl", "sport": "football", "name": "Premier League", "country": "England", "enabled": true,
-     "providers": {"the_odds_api": "soccer_epl", "api_sports": {"league": 39}}, "params": {"home_goals": 1.55, "away_goals": 1.28}},
-    {"id": "football.championship", "sport": "football", "name": "Championship", "country": "England", "enabled": false,
-     "providers": {"the_odds_api": "soccer_efl_champ", "api_sports": {"league": 40}}, "params": {"home_goals": 1.42, "away_goals": 1.12}},
-    {"id": "football.bundesliga", "sport": "football", "name": "Bundesliga", "country": "Germany", "enabled": true,
-     "providers": {"the_odds_api": "soccer_germany_bundesliga", "api_sports": {"league": 78}}, "params": {"home_goals": 1.72, "away_goals": 1.38}},
-    {"id": "football.bundesliga2", "sport": "football", "name": "2. Bundesliga", "country": "Germany", "enabled": false,
-     "providers": {"the_odds_api": "soccer_germany_bundesliga2", "api_sports": {"league": 79}}, "params": {"home_goals": 1.62, "away_goals": 1.30}},
-    {"id": "football.serie_a", "sport": "football", "name": "Serie A", "country": "Italy", "enabled": true,
-     "providers": {"the_odds_api": "soccer_italy_serie_a", "api_sports": {"league": 135}}, "params": {"home_goals": 1.45, "away_goals": 1.18}},
-    {"id": "football.ligue_1", "sport": "football", "name": "Ligue 1", "country": "France", "enabled": true,
-     "providers": {"the_odds_api": "soccer_france_ligue_one", "api_sports": {"league": 61}}, "params": {"home_goals": 1.52, "away_goals": 1.22}},
-    {"id": "football.eredivisie", "sport": "football", "name": "Eredivisie", "country": "Netherlands", "enabled": false,
-     "providers": {"the_odds_api": "soccer_netherlands_eredivisie", "api_sports": {"league": 88}}, "params": {"home_goals": 1.75, "away_goals": 1.35}},
-    {"id": "football.primeira_liga", "sport": "football", "name": "Primeira Liga", "country": "Portugal", "enabled": false,
-     "providers": {"the_odds_api": "soccer_portugal_primeira_liga", "api_sports": {"league": 94}}},
-    {"id": "football.belgium_pro_league", "sport": "football", "name": "Pro League", "country": "Belgium", "enabled": false,
-     "providers": {"the_odds_api": "soccer_belgium_first_div", "api_sports": {"league": 144}}},
-    {"id": "football.austria_bundesliga", "sport": "football", "name": "Austrian Bundesliga", "country": "Austria", "enabled": false,
-     "providers": {"the_odds_api": "soccer_austria_bundesliga", "api_sports": {"league": 218}}},
-    {"id": "football.swiss_super_league", "sport": "football", "name": "Super League", "country": "Switzerland", "enabled": false,
-     "providers": {"the_odds_api": "soccer_switzerland_superleague", "api_sports": {"league": 207}}},
-    {"id": "football.scotland_premiership", "sport": "football", "name": "Premiership", "country": "Scotland", "enabled": false,
-     "providers": {"the_odds_api": "soccer_spl", "api_sports": {"league": 179}}},
-    {"id": "football.norway_eliteserien", "sport": "football", "name": "Eliteserien", "country": "Norway", "enabled": false,
-     "providers": {"the_odds_api": "soccer_norway_eliteserien", "api_sports": {"league": 103}}},
-    {"id": "football.turkey_super_lig", "sport": "football", "name": "Super Lig", "country": "Turkey", "enabled": false,
-     "providers": {"the_odds_api": "soccer_turkey_super_league", "api_sports": {"league": 203}}},
-    {"id": "football.greece_super_league", "sport": "football", "name": "Super League", "country": "Greece", "enabled": false,
-     "providers": {"the_odds_api": "soccer_greece_super_league", "api_sports": {"league": 197}}},
-    {"id": "football.poland_ekstraklasa", "sport": "football", "name": "Ekstraklasa", "country": "Poland", "enabled": false,
-     "providers": {"the_odds_api": "soccer_poland_ekstraklasa", "api_sports": {"league": 106}}},
-    {"id": "football.ucl", "sport": "football", "name": "UEFA Champions League", "country": "Europe", "enabled": true,
-     "providers": {"the_odds_api": "soccer_uefa_champs_league", "api_sports": {"league": 2}}, "params": {"home_goals": 1.62, "away_goals": 1.30}},
-    {"id": "football.uel", "sport": "football", "name": "UEFA Europa League", "country": "Europe", "enabled": true,
-     "providers": {"the_odds_api": "soccer_uefa_europa_league", "api_sports": {"league": 3}}},
-    {"id": "football.uecl", "sport": "football", "name": "UEFA Conference League", "country": "Europe", "enabled": true,
-     "providers": {"the_odds_api": "soccer_uefa_europa_conference_league", "api_sports": {"league": 848}}},
-    {"id": "football.nations_league", "sport": "football", "name": "UEFA Nations League", "country": "Europe", "enabled": false,
-     "providers": {"the_odds_api": "soccer_uefa_nations_league", "api_sports": {"league": 5}}},
-    {"id": "football.wcq_europe", "sport": "football", "name": "World Cup Qualifiers (Europe)", "country": "Europe", "enabled": false,
-     "providers": {"the_odds_api": "soccer_fifa_world_cup_qualifiers_europe", "api_sports": {"league": 32}}},
-
-    {"id": "basketball.euroleague", "sport": "basketball", "name": "EuroLeague", "country": "Europe", "enabled": true,
-     "providers": {"the_odds_api": "basketball_euroleague", "api_sports": {"names": ["Euroleague", "EuroLeague"], "country": "Europe"}},
-     "params": {"avg_total": 162.0, "home_adv": 3.2, "sd_m": 11.5, "sd_t": 15.5}},
-    {"id": "basketball.eurocup", "sport": "basketball", "name": "EuroCup", "country": "Europe", "enabled": false,
-     "providers": {"api_sports": {"names": ["Eurocup", "EuroCup"], "country": "Europe"}},
-     "params": {"avg_total": 162.0, "home_adv": 3.2, "sd_m": 12.0, "sd_t": 16.0}},
-    {"id": "basketball.bcl", "sport": "basketball", "name": "Basketball Champions League", "country": "Europe", "enabled": false,
-     "providers": {"api_sports": {"names": ["Champions League"], "country": "Europe"}},
-     "params": {"avg_total": 158.0, "home_adv": 3.0, "sd_m": 12.0, "sd_t": 16.0}},
-    {"id": "basketball.nba", "sport": "basketball", "name": "NBA", "country": "USA", "enabled": true,
-     "providers": {"the_odds_api": "basketball_nba", "api_sports": {"names": ["NBA"], "country": "USA"}},
-     "params": {"avg_total": 228.0, "home_adv": 2.2, "sd_m": 13.0, "sd_t": 18.0}},
-
-    {"id": "handball.ehf_champions_league", "sport": "handball", "name": "EHF Champions League", "country": "Europe", "enabled": true,
-     "providers": {"api_sports": {"names": ["EHF Champions League", "Champions League"], "country": "Europe"}},
-     "params": {"avg_total": 60.0, "home_adv": 2.0}},
-    {"id": "handball.ehf_european_league", "sport": "handball", "name": "EHF European League", "country": "Europe", "enabled": false,
-     "providers": {"api_sports": {"names": ["EHF European League", "European League", "EHF Cup"], "country": "Europe"}},
-     "params": {"avg_total": 59.0, "home_adv": 2.0}},
-    {"id": "handball.ehf_euro", "sport": "handball", "name": "EHF EURO (men)", "country": "Europe", "enabled": true,
-     "providers": {"api_sports": {"names": ["European Championship", "EHF Euro", "EHF EURO"], "country": "Europe"}},
-     "params": {"avg_total": 56.0, "neutral": true}},
-    {"id": "handball.ihf_world_championship", "sport": "handball", "name": "IHF World Championship (men)", "country": "World", "enabled": true,
-     "providers": {"api_sports": {"names": ["World Championship", "World Championship - Men"], "country": "World"}},
-     "params": {"avg_total": 56.0, "neutral": true, "sd_m": 6.5}},
-    {"id": "handball.olympics", "sport": "handball", "name": "Olympic Games (men)", "country": "World", "enabled": false,
-     "providers": {"api_sports": {"names": ["Olympic Games", "Olympics"], "country": "World"}},
-     "params": {"avg_total": 56.0, "neutral": true}},
-    {"id": "handball.germany_bundesliga", "sport": "handball", "name": "Handball-Bundesliga", "country": "Germany", "enabled": true,
-     "providers": {"the_odds_api": "handball_germany_bundesliga", "api_sports": {"names": ["Bundesliga"], "country": "Germany"}},
-     "params": {"avg_total": 58.0, "home_adv": 2.0}}
-  ]
+ "_comment": "Competition registry. Add a competition by adding an entry; nothing else in the code needs to change. providers.the_odds_api = The Odds API sport key (a trailing * matches every running tournament, e.g. tennis_atp_*). providers.api_sports = {\"league\": id} or {\"names\": [...], \"country\": \"...\"} (resolved automatically). params overrides the sport model defaults.",
+ "competitions": [
+  {
+   "id": "football.epl",
+   "sport": "football",
+   "name": "Premier League",
+   "country": "England",
+   "enabled": true,
+   "providers": {
+    "the_odds_api": "soccer_epl",
+    "api_sports": {
+     "league": 39
+    }
+   },
+   "params": {
+    "home_goals": 1.55,
+    "away_goals": 1.28
+   }
+  },
+  {
+   "id": "football.championship",
+   "sport": "football",
+   "name": "Championship",
+   "country": "England",
+   "enabled": false,
+   "providers": {
+    "the_odds_api": "soccer_efl_champ",
+    "api_sports": {
+     "league": 40
+    }
+   },
+   "params": {
+    "home_goals": 1.42,
+    "away_goals": 1.12
+   }
+  },
+  {
+   "id": "football.league_one",
+   "sport": "football",
+   "name": "League One",
+   "country": "England",
+   "enabled": false,
+   "providers": {
+    "the_odds_api": "soccer_england_league1",
+    "api_sports": {
+     "league": 41
+    }
+   }
+  },
+  {
+   "id": "football.league_two",
+   "sport": "football",
+   "name": "League Two",
+   "country": "England",
+   "enabled": false,
+   "providers": {
+    "the_odds_api": "soccer_england_league2",
+    "api_sports": {
+     "league": 42
+    }
+   }
+  },
+  {
+   "id": "football.fa_cup",
+   "sport": "football",
+   "name": "FA Cup",
+   "country": "England",
+   "enabled": false,
+   "providers": {
+    "the_odds_api": "soccer_fa_cup",
+    "api_sports": {
+     "league": 45
+    }
+   }
+  },
+  {
+   "id": "football.efl_cup",
+   "sport": "football",
+   "name": "EFL Cup",
+   "country": "England",
+   "enabled": false,
+   "providers": {
+    "the_odds_api": "soccer_england_efl_cup",
+    "api_sports": {
+     "league": 48
+    }
+   }
+  },
+  {
+   "id": "football.la_liga",
+   "sport": "football",
+   "name": "La Liga",
+   "country": "Spain",
+   "enabled": true,
+   "providers": {
+    "the_odds_api": "soccer_spain_la_liga",
+    "api_sports": {
+     "league": 140
+    }
+   },
+   "params": {
+    "home_goals": 1.45,
+    "away_goals": 1.1
+   }
+  },
+  {
+   "id": "football.la_liga2",
+   "sport": "football",
+   "name": "Segunda División",
+   "country": "Spain",
+   "enabled": false,
+   "providers": {
+    "the_odds_api": "soccer_spain_segunda_division",
+    "api_sports": {
+     "league": 141
+    }
+   },
+   "params": {
+    "home_goals": 1.3,
+    "away_goals": 0.95
+   }
+  },
+  {
+   "id": "football.copa_del_rey",
+   "sport": "football",
+   "name": "Copa del Rey",
+   "country": "Spain",
+   "enabled": false,
+   "providers": {
+    "the_odds_api": "soccer_spain_copa_del_rey",
+    "api_sports": {
+     "league": 143
+    }
+   }
+  },
+  {
+   "id": "football.bundesliga",
+   "sport": "football",
+   "name": "Bundesliga",
+   "country": "Germany",
+   "enabled": true,
+   "providers": {
+    "the_odds_api": "soccer_germany_bundesliga",
+    "api_sports": {
+     "league": 78
+    }
+   },
+   "params": {
+    "home_goals": 1.72,
+    "away_goals": 1.38
+   }
+  },
+  {
+   "id": "football.bundesliga2",
+   "sport": "football",
+   "name": "2. Bundesliga",
+   "country": "Germany",
+   "enabled": false,
+   "providers": {
+    "the_odds_api": "soccer_germany_bundesliga2",
+    "api_sports": {
+     "league": 79
+    }
+   },
+   "params": {
+    "home_goals": 1.62,
+    "away_goals": 1.3
+   }
+  },
+  {
+   "id": "football.liga3",
+   "sport": "football",
+   "name": "3. Liga",
+   "country": "Germany",
+   "enabled": false,
+   "providers": {
+    "the_odds_api": "soccer_germany_liga3",
+    "api_sports": {
+     "league": 80
+    }
+   }
+  },
+  {
+   "id": "football.dfb_pokal",
+   "sport": "football",
+   "name": "DFB-Pokal",
+   "country": "Germany",
+   "enabled": false,
+   "providers": {
+    "the_odds_api": "soccer_germany_dfb_pokal",
+    "api_sports": {
+     "league": 81
+    }
+   }
+  },
+  {
+   "id": "football.serie_a",
+   "sport": "football",
+   "name": "Serie A",
+   "country": "Italy",
+   "enabled": true,
+   "providers": {
+    "the_odds_api": "soccer_italy_serie_a",
+    "api_sports": {
+     "league": 135
+    }
+   },
+   "params": {
+    "home_goals": 1.45,
+    "away_goals": 1.18
+   }
+  },
+  {
+   "id": "football.serie_b",
+   "sport": "football",
+   "name": "Serie B",
+   "country": "Italy",
+   "enabled": false,
+   "providers": {
+    "the_odds_api": "soccer_italy_serie_b",
+    "api_sports": {
+     "league": 136
+    }
+   },
+   "params": {
+    "home_goals": 1.3,
+    "away_goals": 1.0
+   }
+  },
+  {
+   "id": "football.coppa_italia",
+   "sport": "football",
+   "name": "Coppa Italia",
+   "country": "Italy",
+   "enabled": false,
+   "providers": {
+    "the_odds_api": "soccer_italy_coppa_italia",
+    "api_sports": {
+     "league": 137
+    }
+   }
+  },
+  {
+   "id": "football.ligue_1",
+   "sport": "football",
+   "name": "Ligue 1",
+   "country": "France",
+   "enabled": true,
+   "providers": {
+    "the_odds_api": "soccer_france_ligue_one",
+    "api_sports": {
+     "league": 61
+    }
+   },
+   "params": {
+    "home_goals": 1.52,
+    "away_goals": 1.22
+   }
+  },
+  {
+   "id": "football.ligue_2",
+   "sport": "football",
+   "name": "Ligue 2",
+   "country": "France",
+   "enabled": false,
+   "providers": {
+    "the_odds_api": "soccer_france_ligue_two",
+    "api_sports": {
+     "league": 62
+    }
+   }
+  },
+  {
+   "id": "football.coupe_de_france",
+   "sport": "football",
+   "name": "Coupe de France",
+   "country": "France",
+   "enabled": false,
+   "providers": {
+    "the_odds_api": "soccer_france_coupe_de_france",
+    "api_sports": {
+     "league": 66
+    }
+   }
+  },
+  {
+   "id": "football.denmark_superliga",
+   "sport": "football",
+   "name": "Superliga",
+   "country": "Denmark",
+   "enabled": true,
+   "providers": {
+    "the_odds_api": "soccer_denmark_superliga",
+    "api_sports": {
+     "league": 119
+    }
+   },
+   "params": {
+    "home_goals": 1.55,
+    "away_goals": 1.25
+   }
+  },
+  {
+   "id": "football.denmark_1st_division",
+   "sport": "football",
+   "name": "1. Division",
+   "country": "Denmark",
+   "enabled": false,
+   "providers": {
+    "api_sports": {
+     "league": 120
+    }
+   }
+  },
+  {
+   "id": "football.sweden_allsvenskan",
+   "sport": "football",
+   "name": "Allsvenskan",
+   "country": "Sweden",
+   "enabled": true,
+   "providers": {
+    "the_odds_api": "soccer_sweden_allsvenskan",
+    "api_sports": {
+     "league": 113
+    }
+   },
+   "params": {
+    "home_goals": 1.55,
+    "away_goals": 1.2
+   }
+  },
+  {
+   "id": "football.sweden_superettan",
+   "sport": "football",
+   "name": "Superettan",
+   "country": "Sweden",
+   "enabled": false,
+   "providers": {
+    "the_odds_api": "soccer_sweden_superettan",
+    "api_sports": {
+     "league": 114
+    }
+   }
+  },
+  {
+   "id": "football.norway_eliteserien",
+   "sport": "football",
+   "name": "Eliteserien",
+   "country": "Norway",
+   "enabled": false,
+   "providers": {
+    "the_odds_api": "soccer_norway_eliteserien",
+    "api_sports": {
+     "league": 103
+    }
+   }
+  },
+  {
+   "id": "football.finland_veikkausliiga",
+   "sport": "football",
+   "name": "Veikkausliiga",
+   "country": "Finland",
+   "enabled": false,
+   "providers": {
+    "the_odds_api": "soccer_finland_veikkausliiga",
+    "api_sports": {
+     "league": 244
+    }
+   }
+  },
+  {
+   "id": "football.eredivisie",
+   "sport": "football",
+   "name": "Eredivisie",
+   "country": "Netherlands",
+   "enabled": false,
+   "providers": {
+    "the_odds_api": "soccer_netherlands_eredivisie",
+    "api_sports": {
+     "league": 88
+    }
+   },
+   "params": {
+    "home_goals": 1.75,
+    "away_goals": 1.35
+   }
+  },
+  {
+   "id": "football.primeira_liga",
+   "sport": "football",
+   "name": "Primeira Liga",
+   "country": "Portugal",
+   "enabled": false,
+   "providers": {
+    "the_odds_api": "soccer_portugal_primeira_liga",
+    "api_sports": {
+     "league": 94
+    }
+   }
+  },
+  {
+   "id": "football.belgium_pro_league",
+   "sport": "football",
+   "name": "Pro League",
+   "country": "Belgium",
+   "enabled": false,
+   "providers": {
+    "the_odds_api": "soccer_belgium_first_div",
+    "api_sports": {
+     "league": 144
+    }
+   }
+  },
+  {
+   "id": "football.austria_bundesliga",
+   "sport": "football",
+   "name": "Austrian Bundesliga",
+   "country": "Austria",
+   "enabled": false,
+   "providers": {
+    "the_odds_api": "soccer_austria_bundesliga",
+    "api_sports": {
+     "league": 218
+    }
+   }
+  },
+  {
+   "id": "football.swiss_super_league",
+   "sport": "football",
+   "name": "Super League",
+   "country": "Switzerland",
+   "enabled": false,
+   "providers": {
+    "the_odds_api": "soccer_switzerland_superleague",
+    "api_sports": {
+     "league": 207
+    }
+   }
+  },
+  {
+   "id": "football.scotland_premiership",
+   "sport": "football",
+   "name": "Premiership",
+   "country": "Scotland",
+   "enabled": false,
+   "providers": {
+    "the_odds_api": "soccer_spl",
+    "api_sports": {
+     "league": 179
+    }
+   }
+  },
+  {
+   "id": "football.ireland",
+   "sport": "football",
+   "name": "League of Ireland",
+   "country": "Ireland",
+   "enabled": false,
+   "providers": {
+    "the_odds_api": "soccer_league_of_ireland",
+    "api_sports": {
+     "league": 357
+    }
+   }
+  },
+  {
+   "id": "football.turkey_super_lig",
+   "sport": "football",
+   "name": "Süper Lig",
+   "country": "Turkey",
+   "enabled": false,
+   "providers": {
+    "the_odds_api": "soccer_turkey_super_league",
+    "api_sports": {
+     "league": 203
+    }
+   }
+  },
+  {
+   "id": "football.greece_super_league",
+   "sport": "football",
+   "name": "Super League",
+   "country": "Greece",
+   "enabled": false,
+   "providers": {
+    "the_odds_api": "soccer_greece_super_league",
+    "api_sports": {
+     "league": 197
+    }
+   }
+  },
+  {
+   "id": "football.poland_ekstraklasa",
+   "sport": "football",
+   "name": "Ekstraklasa",
+   "country": "Poland",
+   "enabled": false,
+   "providers": {
+    "the_odds_api": "soccer_poland_ekstraklasa",
+    "api_sports": {
+     "league": 106
+    }
+   }
+  },
+  {
+   "id": "football.russia_premier",
+   "sport": "football",
+   "name": "Premier League",
+   "country": "Russia",
+   "enabled": false,
+   "providers": {
+    "the_odds_api": "soccer_russia_premier_league",
+    "api_sports": {
+     "league": 235
+    }
+   }
+  },
+  {
+   "id": "football.ucl",
+   "sport": "football",
+   "name": "UEFA Champions League",
+   "country": "Europe",
+   "enabled": true,
+   "providers": {
+    "the_odds_api": "soccer_uefa_champs_league",
+    "api_sports": {
+     "league": 2
+    }
+   },
+   "params": {
+    "home_goals": 1.62,
+    "away_goals": 1.3
+   }
+  },
+  {
+   "id": "football.ucl_qual",
+   "sport": "football",
+   "name": "UEFA Champions League Qualification",
+   "country": "Europe",
+   "enabled": false,
+   "providers": {
+    "the_odds_api": "soccer_uefa_champs_league_qualification"
+   }
+  },
+  {
+   "id": "football.uel",
+   "sport": "football",
+   "name": "UEFA Europa League",
+   "country": "Europe",
+   "enabled": true,
+   "providers": {
+    "the_odds_api": "soccer_uefa_europa_league",
+    "api_sports": {
+     "league": 3
+    }
+   }
+  },
+  {
+   "id": "football.uecl",
+   "sport": "football",
+   "name": "UEFA Conference League",
+   "country": "Europe",
+   "enabled": true,
+   "providers": {
+    "the_odds_api": "soccer_uefa_europa_conference_league",
+    "api_sports": {
+     "league": 848
+    }
+   }
+  },
+  {
+   "id": "football.nations_league",
+   "sport": "football",
+   "name": "UEFA Nations League",
+   "country": "Europe",
+   "enabled": false,
+   "providers": {
+    "the_odds_api": "soccer_uefa_nations_league",
+    "api_sports": {
+     "league": 5
+    }
+   }
+  },
+  {
+   "id": "football.euro",
+   "sport": "football",
+   "name": "European Championship",
+   "country": "Europe",
+   "enabled": false,
+   "providers": {
+    "the_odds_api": "soccer_uefa_european_championship",
+    "api_sports": {
+     "league": 4
+    }
+   },
+   "params": {
+    "neutral": true
+   }
+  },
+  {
+   "id": "football.euro_qual",
+   "sport": "football",
+   "name": "Euro Qualification",
+   "country": "Europe",
+   "enabled": false,
+   "providers": {
+    "the_odds_api": "soccer_uefa_euro_qualification",
+    "api_sports": {
+     "names": [
+      "Euro Championship - Qualification"
+     ],
+     "country": "World"
+    }
+   }
+  },
+  {
+   "id": "football.world_cup",
+   "sport": "football",
+   "name": "FIFA World Cup",
+   "country": "World",
+   "enabled": false,
+   "providers": {
+    "the_odds_api": "soccer_fifa_world_cup",
+    "api_sports": {
+     "league": 1
+    }
+   },
+   "params": {
+    "neutral": true
+   }
+  },
+  {
+   "id": "football.wcq_europe",
+   "sport": "football",
+   "name": "World Cup Qualifiers (Europe)",
+   "country": "Europe",
+   "enabled": false,
+   "providers": {
+    "the_odds_api": "soccer_fifa_world_cup_qualifiers_europe",
+    "api_sports": {
+     "league": 32
+    }
+   }
+  },
+  {
+   "id": "football.wcq_south_america",
+   "sport": "football",
+   "name": "World Cup Qualifiers (South America)",
+   "country": "South America",
+   "enabled": false,
+   "providers": {
+    "the_odds_api": "soccer_fifa_world_cup_qualifiers_south_america",
+    "api_sports": {
+     "league": 34
+    }
+   }
+  },
+  {
+   "id": "football.club_world_cup",
+   "sport": "football",
+   "name": "FIFA Club World Cup",
+   "country": "World",
+   "enabled": false,
+   "providers": {
+    "the_odds_api": "soccer_fifa_club_world_cup",
+    "api_sports": {
+     "league": 15
+    }
+   },
+   "params": {
+    "neutral": true
+   }
+  },
+  {
+   "id": "football.ucl_women",
+   "sport": "football",
+   "name": "UEFA Women's Champions League",
+   "country": "Europe",
+   "enabled": false,
+   "providers": {
+    "the_odds_api": "soccer_uefa_champs_league_women"
+   }
+  },
+  {
+   "id": "football.bundesliga_women",
+   "sport": "football",
+   "name": "Frauen-Bundesliga",
+   "country": "Germany",
+   "enabled": false,
+   "providers": {
+    "the_odds_api": "soccer_germany_bundesliga_women"
+   }
+  },
+  {
+   "id": "football.world_cup_women",
+   "sport": "football",
+   "name": "FIFA Women's World Cup",
+   "country": "World",
+   "enabled": false,
+   "providers": {
+    "the_odds_api": "soccer_fifa_world_cup_womens"
+   },
+   "params": {
+    "neutral": true
+   }
+  },
+  {
+   "id": "football.mls",
+   "sport": "football",
+   "name": "MLS",
+   "country": "USA",
+   "enabled": false,
+   "providers": {
+    "the_odds_api": "soccer_usa_mls",
+    "api_sports": {
+     "league": 253
+    }
+   }
+  },
+  {
+   "id": "football.leagues_cup",
+   "sport": "football",
+   "name": "Leagues Cup",
+   "country": "World",
+   "enabled": false,
+   "providers": {
+    "the_odds_api": "soccer_concacaf_leagues_cup"
+   }
+  },
+  {
+   "id": "football.gold_cup",
+   "sport": "football",
+   "name": "CONCACAF Gold Cup",
+   "country": "World",
+   "enabled": false,
+   "providers": {
+    "the_odds_api": "soccer_concacaf_gold_cup",
+    "api_sports": {
+     "league": 22
+    }
+   }
+  },
+  {
+   "id": "football.liga_mx",
+   "sport": "football",
+   "name": "Liga MX",
+   "country": "Mexico",
+   "enabled": false,
+   "providers": {
+    "the_odds_api": "soccer_mexico_ligamx",
+    "api_sports": {
+     "league": 262
+    }
+   }
+  },
+  {
+   "id": "football.brazil_serie_a",
+   "sport": "football",
+   "name": "Brasileirão Série A",
+   "country": "Brazil",
+   "enabled": false,
+   "providers": {
+    "the_odds_api": "soccer_brazil_campeonato",
+    "api_sports": {
+     "league": 71
+    }
+   }
+  },
+  {
+   "id": "football.brazil_serie_b",
+   "sport": "football",
+   "name": "Brasileirão Série B",
+   "country": "Brazil",
+   "enabled": false,
+   "providers": {
+    "the_odds_api": "soccer_brazil_serie_b",
+    "api_sports": {
+     "league": 72
+    }
+   }
+  },
+  {
+   "id": "football.argentina",
+   "sport": "football",
+   "name": "Liga Profesional",
+   "country": "Argentina",
+   "enabled": false,
+   "providers": {
+    "the_odds_api": "soccer_argentina_primera_division",
+    "api_sports": {
+     "league": 128
+    }
+   }
+  },
+  {
+   "id": "football.chile",
+   "sport": "football",
+   "name": "Primera División",
+   "country": "Chile",
+   "enabled": false,
+   "providers": {
+    "the_odds_api": "soccer_chile_campeonato",
+    "api_sports": {
+     "league": 265
+    }
+   }
+  },
+  {
+   "id": "football.libertadores",
+   "sport": "football",
+   "name": "Copa Libertadores",
+   "country": "South America",
+   "enabled": false,
+   "providers": {
+    "the_odds_api": "soccer_conmebol_copa_libertadores",
+    "api_sports": {
+     "league": 13
+    }
+   }
+  },
+  {
+   "id": "football.sudamericana",
+   "sport": "football",
+   "name": "Copa Sudamericana",
+   "country": "South America",
+   "enabled": false,
+   "providers": {
+    "the_odds_api": "soccer_conmebol_copa_sudamericana",
+    "api_sports": {
+     "league": 11
+    }
+   }
+  },
+  {
+   "id": "football.copa_america",
+   "sport": "football",
+   "name": "Copa América",
+   "country": "South America",
+   "enabled": false,
+   "providers": {
+    "the_odds_api": "soccer_conmebol_copa_america",
+    "api_sports": {
+     "league": 9
+    }
+   },
+   "params": {
+    "neutral": true
+   }
+  },
+  {
+   "id": "football.afcon",
+   "sport": "football",
+   "name": "Africa Cup of Nations",
+   "country": "Africa",
+   "enabled": false,
+   "providers": {
+    "the_odds_api": "soccer_africa_cup_of_nations",
+    "api_sports": {
+     "league": 6
+    }
+   },
+   "params": {
+    "neutral": true
+   }
+  },
+  {
+   "id": "football.saudi_pro",
+   "sport": "football",
+   "name": "Saudi Pro League",
+   "country": "Saudi Arabia",
+   "enabled": false,
+   "providers": {
+    "the_odds_api": "soccer_saudi_arabia_pro_league",
+    "api_sports": {
+     "league": 307
+    }
+   }
+  },
+  {
+   "id": "football.j_league",
+   "sport": "football",
+   "name": "J1 League",
+   "country": "Japan",
+   "enabled": false,
+   "providers": {
+    "the_odds_api": "soccer_japan_j_league",
+    "api_sports": {
+     "league": 98
+    }
+   }
+  },
+  {
+   "id": "football.k_league",
+   "sport": "football",
+   "name": "K League 1",
+   "country": "South Korea",
+   "enabled": false,
+   "providers": {
+    "the_odds_api": "soccer_korea_kleague1",
+    "api_sports": {
+     "league": 292
+    }
+   }
+  },
+  {
+   "id": "football.china_super",
+   "sport": "football",
+   "name": "Super League",
+   "country": "China",
+   "enabled": false,
+   "providers": {
+    "the_odds_api": "soccer_china_superleague",
+    "api_sports": {
+     "league": 169
+    }
+   }
+  },
+  {
+   "id": "football.a_league",
+   "sport": "football",
+   "name": "A-League",
+   "country": "Australia",
+   "enabled": false,
+   "providers": {
+    "the_odds_api": "soccer_australia_aleague",
+    "api_sports": {
+     "league": 188
+    }
+   }
+  },
+  {
+   "id": "basketball.euroleague",
+   "sport": "basketball",
+   "name": "EuroLeague",
+   "country": "Europe",
+   "enabled": true,
+   "providers": {
+    "the_odds_api": "basketball_euroleague",
+    "api_sports": {
+     "names": [
+      "Euroleague",
+      "EuroLeague"
+     ],
+     "country": "Europe"
+    }
+   },
+   "params": {
+    "avg_total": 162.0,
+    "home_adv": 3.2,
+    "sd_m": 11.5,
+    "sd_t": 15.5
+   }
+  },
+  {
+   "id": "basketball.eurocup",
+   "sport": "basketball",
+   "name": "EuroCup",
+   "country": "Europe",
+   "enabled": false,
+   "providers": {
+    "api_sports": {
+     "names": [
+      "Eurocup",
+      "EuroCup"
+     ],
+     "country": "Europe"
+    }
+   },
+   "params": {
+    "avg_total": 162.0,
+    "home_adv": 3.2,
+    "sd_m": 12.0,
+    "sd_t": 16.0
+   }
+  },
+  {
+   "id": "basketball.bcl",
+   "sport": "basketball",
+   "name": "Basketball Champions League",
+   "country": "Europe",
+   "enabled": false,
+   "providers": {
+    "api_sports": {
+     "names": [
+      "Champions League"
+     ],
+     "country": "Europe"
+    }
+   },
+   "params": {
+    "avg_total": 158.0,
+    "home_adv": 3.0,
+    "sd_m": 12.0,
+    "sd_t": 16.0
+   }
+  },
+  {
+   "id": "basketball.denmark_basketligaen",
+   "sport": "basketball",
+   "name": "Basketligaen",
+   "country": "Denmark",
+   "enabled": true,
+   "providers": {
+    "api_sports": {
+     "names": [
+      "Basketligaen"
+     ],
+     "country": "Denmark"
+    }
+   },
+   "params": {
+    "avg_total": 165.0,
+    "home_adv": 3.5,
+    "sd_m": 13.0,
+    "sd_t": 17.0
+   }
+  },
+  {
+   "id": "basketball.spain_acb",
+   "sport": "basketball",
+   "name": "Liga ACB",
+   "country": "Spain",
+   "enabled": false,
+   "providers": {
+    "api_sports": {
+     "names": [
+      "ACB",
+      "Liga ACB"
+     ],
+     "country": "Spain"
+    }
+   },
+   "params": {
+    "avg_total": 162.0,
+    "home_adv": 3.0,
+    "sd_m": 12.0,
+    "sd_t": 16.0
+   }
+  },
+  {
+   "id": "basketball.sweden_basketligan",
+   "sport": "basketball",
+   "name": "Basketligan",
+   "country": "Sweden",
+   "enabled": false,
+   "providers": {
+    "api_sports": {
+     "names": [
+      "Basketligan"
+     ],
+     "country": "Sweden"
+    }
+   },
+   "params": {
+    "avg_total": 168.0,
+    "home_adv": 3.5,
+    "sd_m": 13.0,
+    "sd_t": 17.0
+   }
+  },
+  {
+   "id": "basketball.nba",
+   "sport": "basketball",
+   "name": "NBA",
+   "country": "USA",
+   "enabled": true,
+   "providers": {
+    "the_odds_api": "basketball_nba",
+    "api_sports": {
+     "names": [
+      "NBA"
+     ],
+     "country": "USA"
+    }
+   },
+   "params": {
+    "avg_total": 228.0,
+    "home_adv": 2.2,
+    "sd_m": 13.0,
+    "sd_t": 18.0
+   }
+  },
+  {
+   "id": "basketball.wnba",
+   "sport": "basketball",
+   "name": "WNBA",
+   "country": "USA",
+   "enabled": false,
+   "providers": {
+    "the_odds_api": "basketball_wnba",
+    "api_sports": {
+     "names": [
+      "WNBA"
+     ],
+     "country": "USA"
+    }
+   },
+   "params": {
+    "avg_total": 162.0,
+    "home_adv": 2.0,
+    "sd_m": 11.5,
+    "sd_t": 15.0
+   }
+  },
+  {
+   "id": "basketball.ncaab",
+   "sport": "basketball",
+   "name": "NCAA Basketball",
+   "country": "USA",
+   "enabled": false,
+   "providers": {
+    "the_odds_api": "basketball_ncaab",
+    "api_sports": {
+     "names": [
+      "NCAA"
+     ],
+     "country": "USA"
+    }
+   },
+   "params": {
+    "avg_total": 142.0,
+    "home_adv": 3.5,
+    "sd_m": 11.0,
+    "sd_t": 15.0
+   }
+  },
+  {
+   "id": "basketball.nbl",
+   "sport": "basketball",
+   "name": "NBL",
+   "country": "Australia",
+   "enabled": false,
+   "providers": {
+    "the_odds_api": "basketball_nbl",
+    "api_sports": {
+     "names": [
+      "NBL"
+     ],
+     "country": "Australia"
+    }
+   },
+   "params": {
+    "avg_total": 175.0,
+    "home_adv": 3.0,
+    "sd_m": 12.0,
+    "sd_t": 16.0
+   }
+  },
+  {
+   "id": "handball.ehf_champions_league",
+   "sport": "handball",
+   "name": "EHF Champions League",
+   "country": "Europe",
+   "enabled": true,
+   "providers": {
+    "api_sports": {
+     "names": [
+      "EHF Champions League",
+      "Champions League"
+     ],
+     "country": "Europe"
+    }
+   },
+   "params": {
+    "avg_total": 60.0,
+    "home_adv": 2.0
+   }
+  },
+  {
+   "id": "handball.ehf_european_league",
+   "sport": "handball",
+   "name": "EHF European League",
+   "country": "Europe",
+   "enabled": false,
+   "providers": {
+    "api_sports": {
+     "names": [
+      "EHF European League",
+      "European League",
+      "EHF Cup"
+     ],
+     "country": "Europe"
+    }
+   },
+   "params": {
+    "avg_total": 59.0,
+    "home_adv": 2.0
+   }
+  },
+  {
+   "id": "handball.ehf_euro",
+   "sport": "handball",
+   "name": "EHF EURO (men)",
+   "country": "Europe",
+   "enabled": true,
+   "providers": {
+    "api_sports": {
+     "names": [
+      "European Championship",
+      "EHF Euro",
+      "EHF EURO"
+     ],
+     "country": "Europe"
+    }
+   },
+   "params": {
+    "avg_total": 56.0,
+    "neutral": true
+   }
+  },
+  {
+   "id": "handball.ihf_world_championship",
+   "sport": "handball",
+   "name": "IHF World Championship (men)",
+   "country": "World",
+   "enabled": true,
+   "providers": {
+    "api_sports": {
+     "names": [
+      "World Championship",
+      "World Championship - Men"
+     ],
+     "country": "World"
+    }
+   },
+   "params": {
+    "avg_total": 56.0,
+    "neutral": true,
+    "sd_m": 6.5
+   }
+  },
+  {
+   "id": "handball.olympics",
+   "sport": "handball",
+   "name": "Olympic Games (men)",
+   "country": "World",
+   "enabled": false,
+   "providers": {
+    "api_sports": {
+     "names": [
+      "Olympic Games",
+      "Olympics"
+     ],
+     "country": "World"
+    }
+   },
+   "params": {
+    "avg_total": 56.0,
+    "neutral": true
+   }
+  },
+  {
+   "id": "handball.denmark_herreligaen",
+   "sport": "handball",
+   "name": "Herreligaen",
+   "country": "Denmark",
+   "enabled": true,
+   "providers": {
+    "api_sports": {
+     "names": [
+      "Herreligaen",
+      "Handboldligaen",
+      "Herre Handbold Ligaen",
+      "HTH Herreligaen"
+     ],
+     "country": "Denmark"
+    }
+   },
+   "params": {
+    "avg_total": 60.0,
+    "home_adv": 2.0
+   }
+  },
+  {
+   "id": "handball.denmark_kvindeligaen",
+   "sport": "handball",
+   "name": "Kvindeligaen",
+   "country": "Denmark",
+   "enabled": false,
+   "providers": {
+    "api_sports": {
+     "names": [
+      "Kvindeligaen",
+      "Damehåndboldligaen",
+      "Women"
+     ],
+     "country": "Denmark"
+    }
+   },
+   "params": {
+    "avg_total": 54.0,
+    "home_adv": 2.0
+   }
+  },
+  {
+   "id": "handball.spain_asobal",
+   "sport": "handball",
+   "name": "Liga ASOBAL",
+   "country": "Spain",
+   "enabled": false,
+   "providers": {
+    "api_sports": {
+     "names": [
+      "Liga ASOBAL",
+      "Liga Asobal",
+      "ASOBAL"
+     ],
+     "country": "Spain"
+    }
+   },
+   "params": {
+    "avg_total": 57.0,
+    "home_adv": 2.0
+   }
+  },
+  {
+   "id": "handball.sweden_handbollsligan",
+   "sport": "handball",
+   "name": "Handbollsligan",
+   "country": "Sweden",
+   "enabled": false,
+   "providers": {
+    "api_sports": {
+     "names": [
+      "Handbollsligan"
+     ],
+     "country": "Sweden"
+    }
+   },
+   "params": {
+    "avg_total": 58.0,
+    "home_adv": 2.0
+   }
+  },
+  {
+   "id": "handball.norway_eliteserien",
+   "sport": "handball",
+   "name": "Eliteserien (handball)",
+   "country": "Norway",
+   "enabled": false,
+   "providers": {
+    "api_sports": {
+     "names": [
+      "Eliteserien"
+     ],
+     "country": "Norway"
+    }
+   },
+   "params": {
+    "avg_total": 58.0,
+    "home_adv": 2.0
+   }
+  },
+  {
+   "id": "handball.france_starligue",
+   "sport": "handball",
+   "name": "Starligue",
+   "country": "France",
+   "enabled": false,
+   "providers": {
+    "api_sports": {
+     "names": [
+      "Starligue",
+      "LNH Division 1",
+      "Division 1"
+     ],
+     "country": "France"
+    }
+   },
+   "params": {
+    "avg_total": 60.0,
+    "home_adv": 2.0
+   }
+  },
+  {
+   "id": "handball.germany_bundesliga",
+   "sport": "handball",
+   "name": "Handball-Bundesliga",
+   "country": "Germany",
+   "enabled": true,
+   "providers": {
+    "the_odds_api": "handball_germany_bundesliga",
+    "api_sports": {
+     "names": [
+      "Bundesliga"
+     ],
+     "country": "Germany"
+    }
+   },
+   "params": {
+    "avg_total": 58.0,
+    "home_adv": 2.0
+   }
+  },
+  {
+   "id": "icehockey.nhl",
+   "sport": "icehockey",
+   "name": "NHL",
+   "country": "USA",
+   "enabled": true,
+   "providers": {
+    "the_odds_api": "icehockey_nhl",
+    "api_sports": {
+     "names": [
+      "NHL"
+     ],
+     "country": "USA"
+    }
+   }
+  },
+  {
+   "id": "icehockey.ahl",
+   "sport": "icehockey",
+   "name": "AHL",
+   "country": "USA",
+   "enabled": false,
+   "providers": {
+    "the_odds_api": "icehockey_ahl",
+    "api_sports": {
+     "names": [
+      "AHL"
+     ],
+     "country": "USA"
+    }
+   }
+  },
+  {
+   "id": "icehockey.shl",
+   "sport": "icehockey",
+   "name": "SHL",
+   "country": "Sweden",
+   "enabled": true,
+   "providers": {
+    "the_odds_api": "icehockey_sweden_hockey_league",
+    "api_sports": {
+     "names": [
+      "SHL"
+     ],
+     "country": "Sweden"
+    }
+   },
+   "params": {
+    "home_goals": 3.0,
+    "away_goals": 2.6
+   }
+  },
+  {
+   "id": "icehockey.hockeyallsvenskan",
+   "sport": "icehockey",
+   "name": "HockeyAllsvenskan",
+   "country": "Sweden",
+   "enabled": false,
+   "providers": {
+    "the_odds_api": "icehockey_sweden_allsvenskan",
+    "api_sports": {
+     "names": [
+      "HockeyAllsvenskan",
+      "Allsvenskan"
+     ],
+     "country": "Sweden"
+    }
+   }
+  },
+  {
+   "id": "icehockey.liiga",
+   "sport": "icehockey",
+   "name": "Liiga",
+   "country": "Finland",
+   "enabled": false,
+   "providers": {
+    "the_odds_api": "icehockey_liiga",
+    "api_sports": {
+     "names": [
+      "Liiga"
+     ],
+     "country": "Finland"
+    }
+   }
+  },
+  {
+   "id": "icehockey.mestis",
+   "sport": "icehockey",
+   "name": "Mestis",
+   "country": "Finland",
+   "enabled": false,
+   "providers": {
+    "the_odds_api": "icehockey_mestis",
+    "api_sports": {
+     "names": [
+      "Mestis"
+     ],
+     "country": "Finland"
+    }
+   }
+  },
+  {
+   "id": "icehockey.denmark_metal_ligaen",
+   "sport": "icehockey",
+   "name": "Metal Ligaen",
+   "country": "Denmark",
+   "enabled": false,
+   "providers": {
+    "api_sports": {
+     "names": [
+      "Metal Ligaen",
+      "Metal ligaen"
+     ],
+     "country": "Denmark"
+    }
+   }
+  },
+  {
+   "id": "americanfootball.nfl",
+   "sport": "americanfootball",
+   "name": "NFL",
+   "country": "USA",
+   "enabled": true,
+   "providers": {
+    "the_odds_api": "americanfootball_nfl"
+   }
+  },
+  {
+   "id": "americanfootball.ncaaf",
+   "sport": "americanfootball",
+   "name": "NCAA Football",
+   "country": "USA",
+   "enabled": false,
+   "providers": {
+    "the_odds_api": "americanfootball_ncaaf"
+   },
+   "params": {
+    "avg_total": 53.0,
+    "sd_m": 15.0,
+    "home_adv": 2.5
+   }
+  },
+  {
+   "id": "americanfootball.cfl",
+   "sport": "americanfootball",
+   "name": "CFL",
+   "country": "Canada",
+   "enabled": false,
+   "providers": {
+    "the_odds_api": "americanfootball_cfl"
+   },
+   "params": {
+    "avg_total": 48.0
+   }
+  },
+  {
+   "id": "americanfootball.ufl",
+   "sport": "americanfootball",
+   "name": "UFL",
+   "country": "USA",
+   "enabled": false,
+   "providers": {
+    "the_odds_api": "americanfootball_ufl"
+   },
+   "params": {
+    "avg_total": 40.0
+   }
+  },
+  {
+   "id": "baseball.mlb",
+   "sport": "baseball",
+   "name": "MLB",
+   "country": "USA",
+   "enabled": false,
+   "providers": {
+    "the_odds_api": "baseball_mlb"
+   }
+  },
+  {
+   "id": "baseball.npb",
+   "sport": "baseball",
+   "name": "NPB",
+   "country": "Japan",
+   "enabled": false,
+   "providers": {
+    "the_odds_api": "baseball_npb"
+   },
+   "params": {
+    "avg_total": 7.0
+   }
+  },
+  {
+   "id": "baseball.kbo",
+   "sport": "baseball",
+   "name": "KBO",
+   "country": "South Korea",
+   "enabled": false,
+   "providers": {
+    "the_odds_api": "baseball_kbo"
+   },
+   "params": {
+    "avg_total": 9.5
+   }
+  },
+  {
+   "id": "mma.ufc",
+   "sport": "mma",
+   "name": "UFC / MMA",
+   "country": "World",
+   "enabled": true,
+   "providers": {
+    "the_odds_api": "mma_mixed_martial_arts"
+   }
+  },
+  {
+   "id": "boxing.boxing",
+   "sport": "boxing",
+   "name": "Boxing",
+   "country": "World",
+   "enabled": true,
+   "providers": {
+    "the_odds_api": "boxing_boxing"
+   }
+  },
+  {
+   "id": "tennis.atp",
+   "sport": "tennis",
+   "name": "ATP Tour",
+   "country": "World",
+   "enabled": true,
+   "providers": {
+    "the_odds_api": "tennis_atp_*"
+   }
+  },
+  {
+   "id": "tennis.wta",
+   "sport": "tennis",
+   "name": "WTA Tour",
+   "country": "World",
+   "enabled": true,
+   "providers": {
+    "the_odds_api": "tennis_wta_*"
+   }
+  }
+ ]
 }

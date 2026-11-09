@@ -22,17 +22,24 @@ def test_status_is_honest_without_sources(client):
 
 def test_bookmaker_coverage_marks_manual_only(client):
     books = {b["key"]: b for b in client.get("/api/bookmakers").json()}
-    assert books["danske_spil"]["state"] == "manual_only" and books["danske_spil"]["limitation"]
-    assert books["eurobet"]["state"] == "manual_only"
+    # only reachable through the paid odds-api.io feed -> "needs API key", with an explanation
+    assert books["danske_spil"]["state"] == "provider_not_configured" and books["danske_spil"]["limitation"]
+    assert books["eurobet"]["state"] == "provider_not_configured"
+    assert books["bet25"]["state"] == "provider_not_configured"
     assert books["nordicbet"]["state"] == "provider_not_configured"
     assert books["danske_spil"]["priority"] and books["nordicbet"]["priority"]
 
 
-def test_excluded_competitions_are_absent(client):
-    names = {c["name"] for c in client.get("/api/competitions").json()["items"]}
-    assert not any(n in names for n in ("Superliga", "La Liga", "Allsvenskan"))
-    sports = {c["sport"] for c in client.get("/api/competitions").json()["items"]}
-    assert sports == {"football", "basketball", "handball"}
+def test_all_requested_leagues_and_sports_present(client):
+    items = client.get("/api/competitions").json()["items"]
+    by_id = {c["id"]: c for c in items}
+    for cid in ("football.denmark_superliga", "football.la_liga", "football.sweden_allsvenskan", "handball.denmark_herreligaen",
+                "basketball.denmark_basketligaen", "mma.ufc", "boxing.boxing", "tennis.atp", "icehockey.nhl"):
+        assert cid in by_id, cid
+    assert by_id["football.la_liga"]["enabled"] and by_id["football.denmark_superliga"]["enabled"]
+    assert {c["category"] for c in items} == {"team", "combat", "racket"}
+    cat = client.get("/api/catalog").json()
+    assert set(cat["categories"]) == {"team", "combat", "racket"} and "mma" in cat["sports"]
 
 
 def test_demo_mode_end_to_end(client):

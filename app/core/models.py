@@ -9,8 +9,8 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.core.markets import MARKET_TYPES, normalise_line
 from app.core.odds_math import validate_odds
+from app.core.sports import is_sport
 
-Sport = Literal["football", "basketball", "handball"]
 FixtureStatus = Literal["scheduled", "live", "finished", "postponed", "cancelled", "unknown"]
 
 
@@ -28,7 +28,7 @@ class Fixture(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     id: str
-    sport: Sport
+    sport: str
     competition_id: str
     competition_name: str
     home: str
@@ -52,6 +52,13 @@ class Fixture(BaseModel):
     @classmethod
     def _utc(cls, v: datetime) -> datetime:
         return as_utc(v)
+
+    @field_validator("sport")
+    @classmethod
+    def _sport(cls, v: str) -> str:
+        if not is_sport(v):
+            raise ValueError(f"unsupported sport {v}")
+        return v
 
     @property
     def name(self) -> str:
@@ -156,6 +163,11 @@ class TeamStats(BaseModel):
     losses_away: Optional[int] = None
     clean_sheets: Optional[int] = None
     failed_to_score: Optional[int] = None
+    # expected goals per game (football), from provider match statistics or manual entry
+    xg_for: Optional[float] = None
+    xg_against: Optional[float] = None
+    xg_games: int = 0
+    xg_source: str = ""
     # Most recent LAST: [{"date", "venue": "H"/"A", "opponent", "scored", "conceded"}]
     recent: list[dict] = Field(default_factory=list)
     fetched_at: datetime = Field(default_factory=utcnow)

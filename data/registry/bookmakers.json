@@ -1,86 +1,820 @@
 {
-  "_comment": "Bookmaker registry. 'sources' maps a bookmaker to the provider identifiers BetFinder can read automatically. A bookmaker without sources can only be priced through manual odds entry. Add aliases if a provider spells a name differently.",
-  "bookmakers": [
-    {
-      "key": "danske_spil",
-      "name": "Danske Spil",
-      "country": "DK",
-      "type": "soft",
-      "priority": true,
-      "aliases": ["danske spil", "oddset", "danske spil oddset"],
-      "sources": {},
-      "limitation": "Danske Spil does not offer a public odds feed, and none of the supported data providers carry its prices. Enter Danske Spil odds manually."
-    },
-    {
-      "key": "nordicbet",
-      "name": "NordicBet",
-      "country": "DK/Nordics",
-      "type": "soft",
-      "priority": true,
-      "aliases": ["nordicbet", "nordic bet"],
-      "sources": {"the_odds_api": ["nordicbet"], "api_sports": ["NordicBet"]}
-    },
-    {
-      "key": "eurobet",
-      "name": "Eurobet",
-      "country": "IT",
-      "type": "soft",
-      "priority": true,
-      "aliases": ["eurobet"],
-      "sources": {},
-      "limitation": "Eurobet is not listed by The Odds API and has no public odds feed. If API-Sports ever supplies it, it is picked up automatically by name. Otherwise enter Eurobet odds manually."
-    },
-    {"key": "pinnacle", "name": "Pinnacle", "country": "INT", "type": "sharp", "aliases": ["pinnacle", "pinnacle sports"],
-     "sources": {"the_odds_api": ["pinnacle"], "api_sports": ["Pinnacle"]},
-     "note": "Low-margin sharp bookmaker. Used as the main benchmark for fair probabilities."},
-    {"key": "betfair_ex", "name": "Betfair Exchange", "country": "INT", "type": "exchange", "aliases": ["betfair", "betfair exchange"],
-     "sources": {"the_odds_api": ["betfair_ex_eu", "betfair_ex_uk"], "api_sports": ["Betfair"]},
-     "note": "Exchange back prices, excluding commission."},
-    {"key": "matchbook", "name": "Matchbook", "country": "INT", "type": "exchange", "aliases": ["matchbook"],
-     "sources": {"the_odds_api": ["matchbook"]}},
-    {"key": "betsson", "name": "Betsson", "country": "SE/MT", "type": "soft", "aliases": ["betsson"],
-     "sources": {"the_odds_api": ["betsson"], "api_sports": ["Betsson"]}},
-    {"key": "unibet", "name": "Unibet", "country": "INT", "type": "soft", "aliases": ["unibet"],
-     "sources": {"the_odds_api": ["unibet_se", "unibet_nl", "unibet_fr", "unibet_it", "unibet_uk"], "api_sports": ["Unibet"]}},
-    {"key": "bet365", "name": "Bet365", "country": "INT", "type": "soft", "aliases": ["bet365", "bet 365"],
-     "sources": {"api_sports": ["Bet365"]}},
-    {"key": "williamhill", "name": "William Hill", "country": "UK", "type": "soft", "aliases": ["william hill", "williamhill"],
-     "sources": {"the_odds_api": ["williamhill"], "api_sports": ["William Hill"]}},
-    {"key": "betway", "name": "Betway", "country": "INT", "type": "soft", "aliases": ["betway"],
-     "sources": {"the_odds_api": ["betway"], "api_sports": ["Betway"]}},
-    {"key": "marathonbet", "name": "Marathonbet", "country": "INT", "type": "soft", "aliases": ["marathonbet", "marathon bet"],
-     "sources": {"the_odds_api": ["marathonbet"], "api_sports": ["Marathonbet"]}},
-    {"key": "onexbet", "name": "1xBet", "country": "INT", "type": "soft", "aliases": ["1xbet"],
-     "sources": {"the_odds_api": ["onexbet"], "api_sports": ["1xBet"]}},
-    {"key": "tipico", "name": "Tipico", "country": "DE", "type": "soft", "aliases": ["tipico"],
-     "sources": {"the_odds_api": ["tipico_de"], "api_sports": ["Tipico"]}},
-    {"key": "leovegas", "name": "LeoVegas", "country": "SE", "type": "soft", "aliases": ["leovegas", "leo vegas"],
-     "sources": {"the_odds_api": ["leovegas_se", "leovegas"]}},
-    {"key": "coolbet", "name": "Coolbet", "country": "EE/Nordics", "type": "soft", "aliases": ["coolbet"],
-     "sources": {"the_odds_api": ["coolbet"]}},
-    {"key": "betclic", "name": "Betclic", "country": "FR", "type": "soft", "aliases": ["betclic"],
-     "sources": {"the_odds_api": ["betclic_fr", "betclic"]}},
-    {"key": "winamax", "name": "Winamax", "country": "FR/DE", "type": "soft", "aliases": ["winamax"],
-     "sources": {"the_odds_api": ["winamax_fr", "winamax_de"]}},
-    {"key": "codere", "name": "Codere", "country": "IT/ES", "type": "soft", "aliases": ["codere"],
-     "sources": {"the_odds_api": ["codere_it"]}},
-    {"key": "betvictor", "name": "BetVictor", "country": "UK", "type": "soft", "aliases": ["betvictor", "bet victor"],
-     "sources": {"the_odds_api": ["betvictor"]}},
-    {"key": "sport888", "name": "888sport", "country": "INT", "type": "soft", "aliases": ["888sport", "888 sport"],
-     "sources": {"the_odds_api": ["sport888"], "api_sports": ["888Sport"]}},
-    {"key": "pmu", "name": "PMU", "country": "FR", "type": "soft", "aliases": ["pmu"],
-     "sources": {"the_odds_api": ["pmu_fr"]}},
-    {"key": "bwin", "name": "Bwin", "country": "INT", "type": "soft", "aliases": ["bwin"],
-     "sources": {"api_sports": ["Bwin"]}},
-    {"key": "tenbet", "name": "10Bet", "country": "INT", "type": "soft", "aliases": ["10bet"],
-     "sources": {"api_sports": ["10Bet"]}},
-    {"key": "interwetten", "name": "Interwetten", "country": "AT", "type": "soft", "aliases": ["interwetten"],
-     "sources": {"api_sports": ["Interwetten"]}},
-    {"key": "comeon", "name": "ComeOn", "country": "SE/MT", "type": "soft", "aliases": ["comeon", "come on"],
-     "sources": {"api_sports": ["ComeOn"]}},
-    {"key": "betano", "name": "Betano", "country": "INT", "type": "soft", "aliases": ["betano"],
-     "sources": {"the_odds_api": ["betano_uk"], "api_sports": ["Betano"]}},
-    {"key": "superbet", "name": "Superbet", "country": "RO/PL", "type": "soft", "aliases": ["superbet"],
-     "sources": {"api_sports": ["Superbet"]}}
-  ]
+ "_comment": "Bookmaker registry. 'sources' lists where BetFinder can read a bookmaker automatically: the_odds_api / odds_api_io / oddspapi / api_sports (APIs) and scraper (public web data, fallback only). A bookmaker without sources can only be priced through manual odds entry.",
+ "bookmakers": [
+  {
+   "key": "danske_spil",
+   "name": "Danske Spil",
+   "country": "DK",
+   "type": "soft",
+   "priority": true,
+   "aliases": [
+    "danske spil",
+    "danskespil",
+    "oddset",
+    "danske spil oddset"
+   ],
+   "sources": {
+    "odds_api_io": [
+     "DanskeSpil"
+    ]
+   },
+   "limitation": "Danske Spil has no public odds feed and blocks automated access. Automatic prices need odds-api.io (paid, about £49/month for 2 bookmakers). Otherwise enter Danske Spil odds manually."
+  },
+  {
+   "key": "nordicbet",
+   "name": "NordicBet",
+   "country": "DK/Nordics",
+   "type": "soft",
+   "priority": true,
+   "aliases": [
+    "nordicbet",
+    "nordic bet"
+   ],
+   "sources": {
+    "the_odds_api": [
+     "nordicbet"
+    ],
+    "api_sports": [
+     "NordicBet"
+    ]
+   }
+  },
+  {
+   "key": "eurobet",
+   "name": "Eurobet",
+   "country": "IT",
+   "type": "soft",
+   "priority": true,
+   "aliases": [
+    "eurobet",
+    "eurobet it",
+    "eurobetit"
+   ],
+   "sources": {
+    "odds_api_io": [
+     "Eurobet IT"
+    ],
+    "oddspapi": [
+     "eurobet"
+    ]
+   },
+   "limitation": "Eurobet is available through odds-api.io (paid) and possibly OddsPapi (free, 250 requests/month). Otherwise enter Eurobet odds manually."
+  },
+  {
+   "key": "pinnacle",
+   "name": "Pinnacle",
+   "country": "INT",
+   "type": "sharp",
+   "aliases": [
+    "pinnacle",
+    "pinnacle sports"
+   ],
+   "sources": {
+    "the_odds_api": [
+     "pinnacle"
+    ],
+    "api_sports": [
+     "Pinnacle"
+    ],
+    "oddspapi": [
+     "pinnacle"
+    ]
+   },
+   "note": "Low-margin sharp bookmaker. Used as the main benchmark for fair probabilities."
+  },
+  {
+   "key": "betfair_ex",
+   "name": "Betfair Exchange",
+   "country": "INT",
+   "type": "exchange",
+   "aliases": [
+    "betfair",
+    "betfair exchange"
+   ],
+   "sources": {
+    "the_odds_api": [
+     "betfair_ex_eu",
+     "betfair_ex_uk"
+    ],
+    "api_sports": [
+     "Betfair"
+    ]
+   },
+   "note": "Exchange back prices, excluding commission."
+  },
+  {
+   "key": "matchbook",
+   "name": "Matchbook",
+   "country": "INT",
+   "type": "exchange",
+   "aliases": [
+    "matchbook"
+   ],
+   "sources": {
+    "the_odds_api": [
+     "matchbook"
+    ]
+   }
+  },
+  {
+   "key": "betsson",
+   "name": "Betsson",
+   "country": "SE/MT",
+   "type": "soft",
+   "aliases": [
+    "betsson",
+    "betsson dk",
+    "betssondk"
+   ],
+   "sources": {
+    "the_odds_api": [
+     "betsson"
+    ],
+    "api_sports": [
+     "Betsson"
+    ]
+   }
+  },
+  {
+   "key": "unibet",
+   "name": "Unibet",
+   "country": "INT",
+   "type": "soft",
+   "aliases": [
+    "unibet",
+    "unibet dk",
+    "unibetdk"
+   ],
+   "sources": {
+    "the_odds_api": [
+     "unibet_se",
+     "unibet_nl",
+     "unibet_fr",
+     "unibet_it",
+     "unibet_uk"
+    ],
+    "api_sports": [
+     "Unibet"
+    ],
+    "oddspapi": [
+     "unibet"
+    ],
+    "scraper": [
+     "kambi:ub"
+    ]
+   }
+  },
+  {
+   "key": "bet365",
+   "name": "Bet365",
+   "country": "INT",
+   "type": "soft",
+   "aliases": [
+    "bet365",
+    "bet 365"
+   ],
+   "sources": {
+    "api_sports": [
+     "Bet365"
+    ],
+    "oddspapi": [
+     "bet365"
+    ]
+   }
+  },
+  {
+   "key": "williamhill",
+   "name": "William Hill",
+   "country": "UK",
+   "type": "soft",
+   "aliases": [
+    "william hill",
+    "williamhill"
+   ],
+   "sources": {
+    "the_odds_api": [
+     "williamhill"
+    ],
+    "api_sports": [
+     "William Hill"
+    ],
+    "oddspapi": [
+     "williamhill"
+    ]
+   }
+  },
+  {
+   "key": "betway",
+   "name": "Betway",
+   "country": "INT",
+   "type": "soft",
+   "aliases": [
+    "betway"
+   ],
+   "sources": {
+    "the_odds_api": [
+     "betway"
+    ],
+    "api_sports": [
+     "Betway"
+    ],
+    "oddspapi": [
+     "betway"
+    ]
+   }
+  },
+  {
+   "key": "marathonbet",
+   "name": "Marathonbet",
+   "country": "INT",
+   "type": "soft",
+   "aliases": [
+    "marathonbet",
+    "marathon bet"
+   ],
+   "sources": {
+    "the_odds_api": [
+     "marathonbet"
+    ],
+    "api_sports": [
+     "Marathonbet"
+    ]
+   }
+  },
+  {
+   "key": "onexbet",
+   "name": "1xBet",
+   "country": "INT",
+   "type": "soft",
+   "aliases": [
+    "1xbet"
+   ],
+   "sources": {
+    "the_odds_api": [
+     "onexbet"
+    ],
+    "api_sports": [
+     "1xBet"
+    ],
+    "oddspapi": [
+     "1xbet"
+    ]
+   }
+  },
+  {
+   "key": "tipico",
+   "name": "Tipico",
+   "country": "DE",
+   "type": "soft",
+   "aliases": [
+    "tipico"
+   ],
+   "sources": {
+    "the_odds_api": [
+     "tipico_de"
+    ],
+    "api_sports": [
+     "Tipico"
+    ]
+   }
+  },
+  {
+   "key": "leovegas",
+   "name": "LeoVegas",
+   "country": "SE",
+   "type": "soft",
+   "aliases": [
+    "leovegas",
+    "leo vegas"
+   ],
+   "sources": {
+    "the_odds_api": [
+     "leovegas_se",
+     "leovegas"
+    ]
+   }
+  },
+  {
+   "key": "coolbet",
+   "name": "Coolbet",
+   "country": "EE/Nordics",
+   "type": "soft",
+   "aliases": [
+    "coolbet"
+   ],
+   "sources": {
+    "the_odds_api": [
+     "coolbet"
+    ]
+   }
+  },
+  {
+   "key": "betclic",
+   "name": "Betclic",
+   "country": "FR",
+   "type": "soft",
+   "aliases": [
+    "betclic"
+   ],
+   "sources": {
+    "the_odds_api": [
+     "betclic_fr",
+     "betclic"
+    ]
+   }
+  },
+  {
+   "key": "winamax",
+   "name": "Winamax",
+   "country": "FR/DE",
+   "type": "soft",
+   "aliases": [
+    "winamax"
+   ],
+   "sources": {
+    "the_odds_api": [
+     "winamax_fr",
+     "winamax_de"
+    ]
+   }
+  },
+  {
+   "key": "codere",
+   "name": "Codere",
+   "country": "IT/ES",
+   "type": "soft",
+   "aliases": [
+    "codere"
+   ],
+   "sources": {
+    "the_odds_api": [
+     "codere_it"
+    ]
+   }
+  },
+  {
+   "key": "betvictor",
+   "name": "BetVictor",
+   "country": "UK",
+   "type": "soft",
+   "aliases": [
+    "betvictor",
+    "bet victor"
+   ],
+   "sources": {
+    "the_odds_api": [
+     "betvictor"
+    ]
+   }
+  },
+  {
+   "key": "sport888",
+   "name": "888sport",
+   "country": "INT",
+   "type": "soft",
+   "aliases": [
+    "888sport",
+    "888 sport"
+   ],
+   "sources": {
+    "the_odds_api": [
+     "sport888"
+    ],
+    "api_sports": [
+     "888Sport"
+    ]
+   }
+  },
+  {
+   "key": "pmu",
+   "name": "PMU",
+   "country": "FR",
+   "type": "soft",
+   "aliases": [
+    "pmu"
+   ],
+   "sources": {
+    "the_odds_api": [
+     "pmu_fr"
+    ]
+   }
+  },
+  {
+   "key": "bwin",
+   "name": "Bwin",
+   "country": "INT",
+   "type": "soft",
+   "aliases": [
+    "bwin"
+   ],
+   "sources": {
+    "api_sports": [
+     "Bwin"
+    ]
+   }
+  },
+  {
+   "key": "tenbet",
+   "name": "10Bet",
+   "country": "INT",
+   "type": "soft",
+   "aliases": [
+    "10bet"
+   ],
+   "sources": {
+    "api_sports": [
+     "10Bet"
+    ]
+   }
+  },
+  {
+   "key": "interwetten",
+   "name": "Interwetten",
+   "country": "AT",
+   "type": "soft",
+   "aliases": [
+    "interwetten"
+   ],
+   "sources": {
+    "api_sports": [
+     "Interwetten"
+    ]
+   }
+  },
+  {
+   "key": "comeon",
+   "name": "ComeOn",
+   "country": "SE/MT",
+   "type": "soft",
+   "aliases": [
+    "comeon",
+    "come on"
+   ],
+   "sources": {
+    "api_sports": [
+     "ComeOn"
+    ]
+   }
+  },
+  {
+   "key": "betano",
+   "name": "Betano",
+   "country": "INT",
+   "type": "soft",
+   "aliases": [
+    "betano"
+   ],
+   "sources": {
+    "the_odds_api": [
+     "betano_uk"
+    ],
+    "api_sports": [
+     "Betano"
+    ]
+   }
+  },
+  {
+   "key": "superbet",
+   "name": "Superbet",
+   "country": "RO/PL",
+   "type": "soft",
+   "aliases": [
+    "superbet"
+   ],
+   "sources": {
+    "api_sports": [
+     "Superbet"
+    ]
+   }
+  },
+  {
+   "key": "bet25",
+   "name": "Bet25",
+   "country": "DK",
+   "type": "soft",
+   "aliases": [
+    "bet25"
+   ],
+   "sources": {
+    "odds_api_io": [
+     "Bet25"
+    ]
+   }
+  },
+  {
+   "key": "paddypower",
+   "name": "Paddy Power",
+   "country": "UK/IE",
+   "type": "soft",
+   "aliases": [
+    "paddy power",
+    "paddypower"
+   ],
+   "sources": {
+    "the_odds_api": [
+     "paddypower"
+    ]
+   }
+  },
+  {
+   "key": "skybet",
+   "name": "Sky Bet",
+   "country": "UK",
+   "type": "soft",
+   "aliases": [
+    "sky bet",
+    "skybet"
+   ],
+   "sources": {
+    "the_odds_api": [
+     "skybet"
+    ]
+   }
+  },
+  {
+   "key": "coral",
+   "name": "Coral",
+   "country": "UK",
+   "type": "soft",
+   "aliases": [
+    "coral"
+   ],
+   "sources": {
+    "the_odds_api": [
+     "coral"
+    ]
+   }
+  },
+  {
+   "key": "ladbrokes",
+   "name": "Ladbrokes",
+   "country": "UK",
+   "type": "soft",
+   "aliases": [
+    "ladbrokes"
+   ],
+   "sources": {
+    "the_odds_api": [
+     "ladbrokes_uk"
+    ]
+   }
+  },
+  {
+   "key": "betfred",
+   "name": "Betfred",
+   "country": "UK",
+   "type": "soft",
+   "aliases": [
+    "betfred"
+   ],
+   "sources": {
+    "the_odds_api": [
+     "betfred_uk"
+    ]
+   }
+  },
+  {
+   "key": "boylesports",
+   "name": "BoyleSports",
+   "country": "IE",
+   "type": "soft",
+   "aliases": [
+    "boylesports"
+   ],
+   "sources": {
+    "the_odds_api": [
+     "boylesports"
+    ]
+   }
+  },
+  {
+   "key": "virginbet",
+   "name": "Virgin Bet",
+   "country": "UK",
+   "type": "soft",
+   "aliases": [
+    "virgin bet",
+    "virginbet"
+   ],
+   "sources": {
+    "the_odds_api": [
+     "virginbet"
+    ]
+   }
+  },
+  {
+   "key": "casumo",
+   "name": "Casumo",
+   "country": "MT",
+   "type": "soft",
+   "aliases": [
+    "casumo"
+   ],
+   "sources": {
+    "the_odds_api": [
+     "casumo"
+    ]
+   }
+  },
+  {
+   "key": "grosvenor",
+   "name": "Grosvenor",
+   "country": "UK",
+   "type": "soft",
+   "aliases": [
+    "grosvenor"
+   ],
+   "sources": {
+    "the_odds_api": [
+     "grosvenor"
+    ]
+   }
+  },
+  {
+   "key": "livescorebet",
+   "name": "LiveScore Bet",
+   "country": "UK",
+   "type": "soft",
+   "aliases": [
+    "livescore bet",
+    "livescorebet"
+   ],
+   "sources": {
+    "the_odds_api": [
+     "livescorebet"
+    ]
+   }
+  },
+  {
+   "key": "betfair_sb",
+   "name": "Betfair Sportsbook",
+   "country": "UK",
+   "type": "soft",
+   "aliases": [
+    "betfair sportsbook"
+   ],
+   "sources": {
+    "the_odds_api": [
+     "betfair_sb_uk"
+    ]
+   }
+  },
+  {
+   "key": "smarkets",
+   "name": "Smarkets",
+   "country": "UK",
+   "type": "exchange",
+   "aliases": [
+    "smarkets"
+   ],
+   "sources": {
+    "the_odds_api": [
+     "smarkets"
+    ]
+   }
+  },
+  {
+   "key": "atg",
+   "name": "ATG",
+   "country": "SE",
+   "type": "soft",
+   "aliases": [
+    "atg"
+   ],
+   "sources": {
+    "the_odds_api": [
+     "atg_se"
+    ]
+   }
+  },
+  {
+   "key": "betinia",
+   "name": "Betinia",
+   "country": "SE",
+   "type": "soft",
+   "aliases": [
+    "betinia"
+   ],
+   "sources": {
+    "the_odds_api": [
+     "betinia_se"
+    ]
+   }
+  },
+  {
+   "key": "betmgm_se",
+   "name": "BetMGM (SE)",
+   "country": "SE",
+   "type": "soft",
+   "aliases": [
+    "betmgm"
+   ],
+   "sources": {
+    "the_odds_api": [
+     "betmgm_se"
+    ]
+   }
+  },
+  {
+   "key": "campobet",
+   "name": "CampoBet",
+   "country": "SE",
+   "type": "soft",
+   "aliases": [
+    "campobet"
+   ],
+   "sources": {
+    "the_odds_api": [
+     "campobet_se"
+    ]
+   }
+  },
+  {
+   "key": "expekt",
+   "name": "Expekt",
+   "country": "SE/DK",
+   "type": "soft",
+   "aliases": [
+    "expekt",
+    "nya expekt"
+   ],
+   "sources": {
+    "the_odds_api": [
+     "expekt_se"
+    ]
+   }
+  },
+  {
+   "key": "hajper",
+   "name": "Hajper",
+   "country": "SE",
+   "type": "soft",
+   "aliases": [
+    "hajper"
+   ],
+   "sources": {
+    "the_odds_api": [
+     "hajper_se"
+    ]
+   }
+  },
+  {
+   "key": "mrgreen",
+   "name": "Mr Green",
+   "country": "SE/DK",
+   "type": "soft",
+   "aliases": [
+    "mr green",
+    "mrgreen"
+   ],
+   "sources": {
+    "the_odds_api": [
+     "mrgreen_se"
+    ]
+   }
+  },
+  {
+   "key": "svenskaspel",
+   "name": "Svenska Spel",
+   "country": "SE",
+   "type": "soft",
+   "aliases": [
+    "svenska spel",
+    "svenskaspel"
+   ],
+   "sources": {
+    "the_odds_api": [
+     "svenskaspel_se"
+    ]
+   }
+  },
+  {
+   "key": "netbet",
+   "name": "NetBet",
+   "country": "FR",
+   "type": "soft",
+   "aliases": [
+    "netbet"
+   ],
+   "sources": {
+    "the_odds_api": [
+     "netbet_fr"
+    ]
+   }
+  },
+  {
+   "key": "paf",
+   "name": "Paf",
+   "country": "FI/SE",
+   "type": "soft",
+   "aliases": [
+    "paf"
+   ],
+   "sources": {
+    "scraper": [
+     "kambi:paf"
+    ]
+   }
+  }
+ ]
 }

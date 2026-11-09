@@ -93,7 +93,7 @@ def test_injuries_shift_probability_and_agents_can_disagree(repo, analysis, sett
 
 def _fake_analysis(fid, kickoff, ev, prob, odds, conf=70, risk="low", qualifies=True):
     sel = {"market_id": "h2h", "market": "h2h", "line": None, "market_label": "Match result 1X2", "selection": "home",
-           "label": f"Home {fid}", "best": {"bookmaker": "nordicbet", "name": "NordicBet", "odds": odds, "flags": []},
+           "label": f"Home {fid}", "best": {"bookmaker": "nordicbet", "name": "NordicBet", "odds": odds, "flags": [], "source": "the_odds_api"},
            "final_prob": prob, "fair_odds": 1 / prob, "ev_pct": ev, "risk_rating": risk, "confidence": conf,
            "explanation": "x", "pricing_flags": [], "rejections": [] if qualifies else ["EV too low"], "qualifies": qualifies}
     return {"fixture": {"id": fid, "home": f"H{fid}", "away": f"A{fid}", "sport": "football", "kickoff": kickoff.isoformat(),
@@ -105,7 +105,7 @@ def test_daily_picks_rules(settings):
     ko = NOW + timedelta(hours=3)
     analyses = [_fake_analysis(i, ko, ev=6 + i, prob=0.55, odds=1.95) for i in range(7)]
     d = build_daily_picks(analyses, settings, NOW)
-    assert 1 <= len(d["coupons"]) <= 2 and d["message"] is None
+    assert 1 <= len(d["coupons"]) <= 3 and d["message"] is None
     seen = set()
     for c in d["coupons"]:
         assert 1 <= len(c["legs"]) <= 3

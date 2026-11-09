@@ -13,3 +13,6 @@ data/runtime/
 .idea/
 .DS_Store
 Thumbs.db
+
+# secrets
+.env

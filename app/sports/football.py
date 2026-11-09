@@ -12,7 +12,7 @@ from typing import Optional
 from app.core.markets import is_quarter_line
 from app.core.models import TeamStats
 from app.core.odds_math import clamp
-from app.sports.base import SportModel, nelder_mead, shrink
+from app.sports.base import SportModel, nelder_mead, shrink, xg_factor, xg_ok
 
 
 @lru_cache(maxsize=4096)
@@ -90,7 +90,7 @@ class FootballModel(SportModel):
         lg_h, lg_a = float(self.params["home_goals"]), float(self.params["away_goals"])
         if self.params.get("neutral"):
             lg_h = lg_a = (lg_h + lg_a) / 2
-        notes: list[str] = []
+        notes: list[tuple] = []
         use_split = home.scored_home is not None and away.scored_away is not None and home.games_home >= 2 and away.games_away >= 2
         if use_split:
             att_h = shrink(home.scored_home, home.games_home, lg_h) / lg_h
@@ -98,7 +98,7 @@ class FootballModel(SportModel):
             att_a = shrink(away.scored_away, away.games_away, lg_a) / lg_a
             def_h = shrink(home.conceded_home, home.games_home, lg_a) / lg_a
             n = min(home.games_home, away.games_away)
-            notes.append("Venue-specific attack/defence ratings")
+            notes.append(("note_venue_ratings", {}))
         else:
             sh, ch = home.overall("scored"), home.overall("conceded")
             sa, ca = away.overall("scored"), away.overall("conceded")
@@ -110,11 +110,20 @@ class FootballModel(SportModel):
             att_a = shrink(sa, away.games, avg) / avg
             def_a = shrink(ca, away.games, avg) / avg
             n = min(home.games, away.games) // 2
-            notes.append("Overall ratings (no home/away split available)")
+            notes.append(("note_overall_ratings", {}))
+        # xG screening: expected goals predict future scoring better than goals,
+        # so the ratings are moved toward the xG numbers when they exist.
+        if xg_ok(home) and xg_ok(away):
+            att_h *= xg_factor(home.overall("scored"), home.xg_for, home.xg_games)
+            def_h *= xg_factor(home.overall("conceded"), home.xg_against, home.xg_games)
+            att_a *= xg_factor(away.overall("scored"), away.xg_for, away.xg_games)
+            def_a *= xg_factor(away.overall("conceded"), away.xg_against, away.xg_games)
+            notes.append(("note_xg_used", {"h_for": home.xg_for, "h_against": home.xg_against,
+                                           "a_for": away.xg_for, "a_against": away.xg_against}))
         lh = clamp(lg_h * att_h * def_a, 0.15, 4.5)
         la = clamp(lg_a * att_a * def_h, 0.15, 4.5)
         confidence = clamp(0.25 + 0.5 * min(n, 10) / 10, 0.0, 0.75)
-        notes.append(f"Expected goals {lh:.2f} - {la:.2f} (sample {n} games per side)")
+        notes.append(("note_expected_score", {"home": f"{lh:.2f}", "away": f"{la:.2f}", "n": n}))
         return {"lh": round(lh, 4), "la": round(la, 4)}, confidence, notes
 
     def blend(self, market, model, weight):
@@ -129,11 +138,11 @@ class FootballModel(SportModel):
 
     def describe(self, theta):
         return {
+            "kind": "score",
             "expected_home": round(theta["lh"], 2),
             "expected_away": round(theta["la"], 2),
             "expected_total": round(theta["lh"] + theta["la"], 2),
             "expected_margin": round(theta["lh"] - theta["la"], 2),
-            "unit": "goals",
         }
 
     # Helpers used by agents --------------------------------------------------
@@ -142,3 +151,25 @@ class FootballModel(SportModel):
 
     def expected_total(self, theta: dict) -> float:
         return theta["lh"] + theta["la"]
+
+
+class IceHockeyModel(FootballModel):
+    """Ice hockey: Poisson goals in regulation.  The main moneyline includes
+    overtime and shoot-out, which is close to a coin flip with a small home
+    edge.  h2h3 is the regulation-time 3-way market."""
+    sport = "icehockey"
+    units_home = 0.30
+    units_total = 0.35
+
+    def default_params(self) -> dict:
+        return {"home_goals": 3.10, "away_goals": 2.80, "rho": 0.0, "max_goals": 12, "neutral": False, "ot_home": 0.52}
+
+    def probabilities(self, theta: dict, market: str, line: Optional[float]) -> Optional[dict[str, float]]:
+        if market == "h2h":
+            p = super().probabilities(theta, "h2h", None)
+            ot = float(self.params.get("ot_home", 0.52))
+            home = p["home"] + p["draw"] * ot
+            return {"home": home, "away": 1.0 - home}
+        if market == "h2h3":
+            return super().probabilities(theta, "h2h", None)
+        return super().probabilities(theta, market, line)

@@ -1,25 +1,27 @@
-"""Daily Picks: up to two coupons of up to three legs, combined odds above the
-target (3.00 by default), built ONLY from qualifying value selections.
+"""Daily Picks: up to three coupons (configurable 1-5) of up to three legs,
+combined odds above the target (3.00 by default), built ONLY from qualifying
+value selections.
 
 Rules:
-* one selection per match, and the two coupons never share a match,
+* one selection per match, and coupons never share a match,
 * never forced: one good coupon gives one coupon, none gives the message
   "No qualifying value bets found today.",
 * high odds alone never qualify.  Every leg needs positive EV above the
-  threshold, enough confidence, acceptable risk and a minimum probability.
+  threshold, a price at or above the fair market price, enough confidence,
+  acceptable risk and a minimum probability,
 * coupons are ranked by expected log-growth (Kelly), which rewards edge but
   penalises long-shot combinations.
 """
 from __future__ import annotations
 
 import itertools
-import uuid
 from collections import Counter
 from datetime import datetime, timedelta
 from typing import Optional
 
 from app.config import RISK_LEVELS, tz
 from app.core.odds_math import combined_odds, combined_probability, kelly_fraction, log_growth
+from app.i18n import lang_of, tr
 
 NO_PICKS_MESSAGE = "No qualifying value bets found today."
 MAX_CANDIDATES = 30
@@ -54,6 +56,7 @@ def _leg(analysis: dict, sel: dict) -> dict:
         "selection_label": sel["label"],
         "bookmaker": sel["best"]["bookmaker"],
         "bookmaker_name": sel["best"]["name"],
+        "source": sel["best"]["source"],
         "odds": sel["best"]["odds"],
         "probability": sel["final_prob"],
         "fair_odds": sel["fair_odds"],
@@ -62,10 +65,13 @@ def _leg(analysis: dict, sel: dict) -> dict:
         "confidence": sel["confidence"],
         "explanation": sel["explanation"],
         "pricing_flags": sel.get("pricing_flags", []),
+        "deviation_level": sel.get("deviation_level"),
+        "stake_amount": sel.get("stake_amount"),
     }
 
 
 def build_daily_picks(analyses: list[dict], settings: dict, now: datetime) -> dict:
+    lang = lang_of(settings)
     start, end, day = day_window(now, settings)
     min_prob = float(settings["min_leg_probability"])
     max_odds = float(settings["max_leg_odds"])
@@ -86,14 +92,14 @@ def build_daily_picks(analyses: list[dict], settings: dict, now: datetime) -> di
         for s in a["selections"]:
             if s["ev_pct"] is None or s["ev_pct"] <= 0:
                 continue
-            reasons = list(s.get("rejections", []))
+            codes = list(s.get("rejection_codes", []))
             if s["final_prob"] is not None and s["final_prob"] < min_prob:
-                reasons.append(f"probability below {min_prob:.0%}")
+                codes.append("probability")
             if s["best"]["odds"] > max_odds:
-                reasons.append(f"odds above {max_odds:g}")
-            if reasons:
-                for r in reasons:
-                    rejections[_bucket(r)] += 1
+                codes.append("odds")
+            if codes:
+                for c in codes:
+                    rejections[c] += 1
                 continue
             score = s["ev_pct"] * s["confidence"]
             if best_for_match is None or score > best_for_match["_score"]:
@@ -110,8 +116,7 @@ def build_daily_picks(analyses: list[dict], settings: dict, now: datetime) -> di
         best = _best_combo(pool, max_legs, target)
         if not best:
             break
-        coupon = _coupon(best, idx + 1, settings)
-        coupons.append(coupon)
+        coupons.append(_coupon(best, idx + 1, settings, lang))
         used |= {leg["fixture_id"] for leg in best}
 
     singles = [_strip(c) for c in candidates if c["fixture_id"] not in used]
@@ -120,14 +125,13 @@ def build_daily_picks(analyses: list[dict], settings: dict, now: datetime) -> di
         "generated_at": now.isoformat(),
         "window": {"from": start.isoformat(), "to": end.isoformat()},
         "coupons": coupons,
-        "message": None if coupons else NO_PICKS_MESSAGE,
+        "message": None if coupons else tr(lang, "dp_none"),
         "singles": singles,
         "diagnostics": {
             "matches_in_window": in_window,
             "qualifying_selections": len(candidates),
             "rejections": dict(rejections.most_common()),
-            "note": ("Qualifying selections exist, but no combination of up to "
-                     f"{max_legs} reaches odds above {target:.2f}.") if candidates and not coupons else None,
+            "note": tr(lang, "dp_note_no_combo", n=max_legs, target=f"{target:.2f}") if candidates and not coupons else None,
         },
         "criteria": {
             "min_ev_pct": settings["min_ev_pct"], "min_confidence": settings["min_confidence"],
@@ -137,16 +141,6 @@ def build_daily_picks(analyses: list[dict], settings: dict, now: datetime) -> di
             "my_bookmakers": settings.get("my_bookmakers") or [],
         },
     }
-
-
-def _bucket(reason: str) -> str:
-    for key in ("EV", "vs market fair price", "confidence", "risk", "probability below", "odds above", "bookmakers", "no probability"):
-        if key in reason:
-            return {"EV": "EV below threshold", "vs market fair price": "price not above market fair price",
-                    "confidence": "confidence too low", "risk": "risk too high",
-                    "probability below": "probability too low", "odds above": "odds too high",
-                    "bookmakers": "not available at your bookmakers", "no probability": "no probability estimate"}[key]
-    return reason
 
 
 def _best_combo(pool: list[dict], max_legs: int, target: float) -> Optional[list[dict]]:
@@ -171,7 +165,7 @@ def _strip(c: dict) -> dict:
     return {k: v for k, v in c.items() if not k.startswith("_")}
 
 
-def _coupon(legs: list[dict], number: int, settings: dict) -> dict:
+def _coupon(legs: list[dict], number: int, settings: dict, lang: str) -> dict:
     o = combined_odds(leg["odds"] for leg in legs)
     p = combined_probability(leg["probability"] for leg in legs)
     risk_idx = max(RISK_LEVELS.index(leg["risk_rating"]) for leg in legs)
@@ -179,8 +173,8 @@ def _coupon(legs: list[dict], number: int, settings: dict) -> dict:
         risk_idx = max(risk_idx, RISK_LEVELS.index("high"))
     stake = kelly_fraction(p, o) * float(settings["kelly_fraction"])
     return {
-        "id": uuid.uuid4().hex[:10],
-        "title": f"Coupon {number}",
+        "id": "",
+        "title": tr(lang, "dp_coupon", n=number),
         "legs": [_strip(leg) for leg in sorted(legs, key=lambda x: x["kickoff"])],
         "combined_odds": round(o, 2),
         "combined_probability": round(p, 4),
@@ -189,6 +183,7 @@ def _coupon(legs: list[dict], number: int, settings: dict) -> dict:
         "risk_rating": RISK_LEVELS[risk_idx],
         "stake_pct": round(stake * 100, 2),
         "stake_amount": round(stake * float(settings["bankroll"]), 2),
+        "currency": settings.get("currency", "DKK"),
         "is_demo": any(leg["is_demo"] for leg in legs),
-        "note": "Legs are from different matches and treated as independent.",
+        "note": tr(lang, "dp_indep"),
     }

@@ -1,136 +1,141 @@
-# BetFinder 1.1
+# BetFinder 1.2
 
-BetFinder scans European bookmaker odds for **football, basketball and handball**. It looks for:
+BetFinder scans bookmaker odds and looks for:
 
-- **pricing errors**: a price far out of line with every other bookmaker
-- **price differences between bookmakers**: where the best price is above the margin-free market price
-- **value bets**: where the estimated true probability is higher than the price implies
+- **pricing errors**: a price far out of line with the rest of the market
+- **price differences between bookmakers**
+- **value bets**: the estimated true probability is higher than the price implies
 
-Ten specialised analysis agents assess each match independently. A combination engine merges their views, and a **Daily Picks** section builds up to two value coupons per day.
+It covers **team sports** (football, basketball, handball, ice hockey, NFL, baseball), **combat sports** (UFC/MMA, boxing) and **racket sports** (tennis). Ten analysis agents assess each match independently. **Daily Picks** builds up to three value coupons per day. The interface is mobile-first, works in **English and Danish**, and can be installed on a phone's home screen.
 
-> **Honesty rule:** BetFinder never invents odds and never pretends a bookmaker is connected. Every price shows its source (provider, manual or demo). A bookmaker without an accessible feed is labelled *Manual entry only*.
+> **Honesty rule:** BetFinder never invents odds, injuries, lineups or results. Every price and data point is labelled with its source and age: *Live API*, *Scraped*, *Manual*, *Historical*, *Demo* or *Missing*.
 
 ---
 
-## Quick start
+## Quick start (your PC)
 
 ```bash
 python -m venv .venv
-.venv\Scripts\activate            # Windows  (macOS/Linux: source .venv/bin/activate)
+.venv\Scripts\activate            # macOS/Linux: source .venv/bin/activate
 pip install -r requirements.txt
 uvicorn main:app --host 127.0.0.1 --port 8000
 ```
 
-Open <http://localhost:8000>. Without an API key the app is empty, by design. You have three options:
+Open <http://localhost:8000>. Turn on **demo mode** under *More → Sources & settings* to see everything working with fictional data. Add API keys there when you are ready for real odds.
 
-1. **Add an API key** under *Sources* (see below), then press the refresh button.
-2. **Enter odds manually** under *Add odds*, for any bookmaker, including Danske Spil and Eurobet.
-3. **Turn on demo mode** under *Sources* to explore with fictional teams and bookmakers. Demo data is clearly marked and never counted in tracker statistics.
+Run the tests with `pip install -r requirements-dev.txt` and then `pytest` (90 tests).
 
-Run the tests with `pip install -r requirements-dev.txt` and then `pytest`.
+## Where the odds come from: the fallback chain
 
-## Data sources
+| # | Source | Method | Cost | What it gives |
+|---|---|---|---|---|
+| 1 | **The Odds API** | API credits | **Free 500 credits/month**. 20K $30, 100K $59/month | NordicBet, Betsson, Unibet, Pinnacle, Betfair, William Hill, 1xBet, LeoVegas, Svenska Spel, Mr Green, Expekt and more, plus UFC, boxing, tennis, NHL/SHL, NFL, MLB |
+| 2 | **API-Sports** | API requests | Free plan covers past seasons only; Pro about $10–19/month per sport | Fixtures, stats, **xG**, form, head-to-head, injuries, suspensions and lineups (football); EHF handball, basketball and hockey data |
+| 3 | **odds-api.io** | API requests | About £49/month (2 bookmakers of your choice) | The only feed found with **Danske Spil** and **Eurobet** (also Bet365, Bet25, Unibet DK) |
+| 4 | **OddsPapi** | Free monthly requests | **Free 250 requests/month** | 300+ bookmakers incl. bet365 and Pinnacle. Used automatically when #1 has no key or no credits left, and by the "Fetch more bookmakers" button |
+| 5 | **Polite scraper** | Scraping | Free | Public JSON odds that some bookmaker sites load in the browser (Kambi platform, e.g. Unibet). Runs only when #1–#4 deliver nothing (or always, if you choose) |
+| – | **Manual entry** | Manual | Free | Any bookmaker. Paste odds copied from the bookmaker's page and they fill in automatically |
 
-| Source | What it provides | Notes |
+**Data usage page** (*More → Data usage*): shows whether odds currently come from **API tokens** or **scraping**, tokens used and left per provider (exact where the provider reports it), the last refresh's fallback chain, blocked sites, and a credit planner that recommends the cheapest The Odds API plan for your refresh interval.
+
+**About scraping:** the scraper respects robots.txt, waits between requests, uses an honest user agent, and never tries to get around blocking (no proxies, headless browsers or CAPTCHA solving). A site that refuses access is paused for 24 hours and shown as *blocked*. Scraping can conflict with a bookmaker's terms of use; you can switch it off under Sources. Danske Spil does not offer such data, so use manual entry or odds-api.io for it.
+
+### Recommended setup and cost
+
+| Goal | Setup | Monthly cost |
 |---|---|---|
-| **The Odds API** (`ODDS_API_KEY`) | Live pre-match odds (1X2, totals, handicaps) from NordicBet, Betsson, Unibet, Pinnacle, Betfair Exchange, Matchbook, William Hill, 1xBet, Marathonbet, Tipico, LeoVegas, Coolbet, Betclic, Winamax, Codere and more | Free plan: 500 credits/month. Each refresh costs competitions × regions × markets credits (shown under *Sources*). Handball: only the German Handball-Bundesliga. |
-| **API-Sports** (`API_SPORTS_KEY`) | Fixtures, odds, team statistics, recent form, head-to-head, results. For football also injuries, suspensions and confirmed lineups. Covers EHF Champions League / EURO / World Championship handball and EuroLeague / NBA basketball | One key covers all three sports, each with its own daily quota. **The free plan usually only covers past seasons**, so current matches need a paid plan. The provider's own error message is shown under *Sources*. |
-| **Manual entry** | Any bookmaker, any supported market | Pick a known match from the search (no need to retype teams or kick-off), choose the bookmaker and type the odds. |
-| **Demo** | Fictional teams and bookmakers | For trying the app only. |
+| Try it / prototype | The Odds API free + OddsPapi free + scraping fallback + manual Danske Spil | **$0** |
+| Serious daily use | The Odds API 20K (refresh hourly), manual Danske Spil | **≈ $30** |
+| Danske Spil and Eurobet automatic | + odds-api.io Solo | **≈ $95** |
+| Full stats, xG, injuries and lineups | + API-Football Pro | **≈ $115** |
 
-**Danske Spil** and **Eurobet** have no public odds feed, and neither provider carries them. They are therefore *Manual entry only*. If API-Sports ever delivers one of them, it is picked up automatically by name.
+## Analysis
 
-You can enter API keys in the UI. They are stored in `data/runtime/settings.json`, which is git-ignored, and never sent back to the browser. On a server, use environment variables instead.
+1. **Odds Scanner Agent** removes each bookmaker's margin (Shin by default) and builds a **fair consensus price**, with sharp books (Pinnacle, exchanges) weighted highest. It also tracks movements, stale prices and arbitrage.
+2. **Value Detection Agent** classifies prices against fair odds with a traffic light: **normal < 5%**, **warning 5–10%**, **alert ≥ 10%**. It flags outliers and *possible pricing errors*.
+3. **Probability Agent** builds an independent **sport-specific model**:
+   - football: Poisson / Dixon-Coles, with **xG blending**
+   - ice hockey: Poisson with overtime
+   - basketball, NFL and baseball: normal models
+   - handball: normal model where draws are a real outcome
+   - UFC, boxing and tennis: market-based strength model
+4. **Form Agent**: momentum, i.e. recent form compared with season level.
+5. **Home/Away Agent**: home/away effects beyond normal home advantage (not used for individual sports).
+6. **Injury Agent** and 7. **Suspension Agent**: absences weighted by player importance.
+8. **Lineup Agent**: confirmed or expected lineups and rotation.
+9. **Statistical Agent**: stats-, **xG**- and head-to-head-implied margin and total compared with the market.
+10. **Risk Agent**: a risk rating per selection.
 
-## How the analysis works
+The bookmaker consensus is the anchor, and agents can only adjust it within limits. A selection **qualifies** only if all of these hold:
 
-1. **Odds Scanner Agent**: compares every bookmaker's price for identical matches and markets. It removes each bookmaker's margin (Shin's method by default; power, proportional and additive are also available) and builds a **consensus fair probability**. Sharp books (Pinnacle, exchanges) get the most weight, otherwise the median of all bookmakers is used. It also tracks odds movement, stale prices and cross-bookmaker arbitrage.
-2. **Value Detection Agent**: flags value, outlier prices and *possible pricing errors* (bookmakers may void obvious errors, so these are marked as higher risk).
-3. **Probability Agent**: an independent, **sport-specific** model built from team statistics:
-   - football: Poisson goals model with Dixon-Coles correction
-   - basketball: normal margin/total model, moneyline including overtime
-   - handball: discretised normal model in which draws are a real outcome
-4. **Form Agent**: recent form compared with each team's season level (momentum).
-5. **Home/Away Agent**: unusually strong home teams or weak away teams.
-6. **Injury Agent**: injured and doubtful players, weighted by importance.
-7. **Suspension Agent**: suspended players.
-8. **Lineup Agent**: confirmed or expected lineups, rotation, and absentees who turn up in the starting XI anyway.
-9. **Statistical Agent**: stats-implied margin and total versus the market, plus head-to-head.
-10. **Risk Agent**: a risk rating (low / medium / high / very high) per selection, based on variance, confidence, market depth, price reliability and agent disagreement.
-
-Agents 3–9 only see raw data, never each other's conclusions, so they can disagree. The engine measures that disagreement, and strong disagreement lowers confidence. **Missing data lowers confidence; it is never filled in.**
-
-**Combination.** The market consensus is the anchor. The sport model is fitted to it. The independent model is blended in with a limited weight, and agent evidence shifts the expected margin and total within a cap. Final probabilities are the consensus moved by the model's *delta*, so model errors can't create fake value.
-
-**Value maths**
-
-- implied probability = 1 / decimal odds
-- EV % = (estimated probability × decimal odds − 1) × 100
-- fair odds = 1 / estimated probability
-
-A selection **qualifies** only if all of these hold:
-
-- EV ≥ the minimum (default 3%)
-- the price is at or above the margin-free market price (agents can't create value on their own)
+- EV ≥ 3%
+- the price is at or above the fair market price
 - confidence ≥ 55
 - risk ≤ medium
-- the price is fresh
 
-High odds alone never qualify.
+Each selection is marked **+EV**, **−EV** or **Insufficient data**. Every analysis shows when each data type was last updated.
 
-## Daily Picks
+Formulas:
 
-- Up to **two coupons**, with **different matches** across them and at most **three legs** each.
-- Combined odds must be **above 3.00**.
-- Built only from qualifying selections in today's window (now until 06:00 local time).
-- Ranked by expected log-growth (Kelly), which rewards edge and penalises long-shot combinations.
-- Never forced. If only one coupon qualifies you get one. If none qualify the page says **"No qualifying value bets found today."** and explains which rules rejected the candidates.
-- Every leg shows: match, sport and competition, market, selection, best bookmaker, odds, estimated probability, fair odds, value %, risk rating and a short explanation.
+- implied probability = 1 / odds
+- EV % = (p × odds − 1) × 100
+- fair odds = 1 / p
+- stake = quarter-Kelly, shown in your currency (DKK by default)
 
-All thresholds can be changed under *Sources → Analysis settings*. Tick "Mine" next to the bookmakers you actually use and picks will only use their prices.
+## Features
 
-## Tracker and CLV
+- **Dashboard**: value bets, pricing errors, dropping odds, today's coupons and performance at a glance.
+- **Scanner**: grouped by category and sport, with filters for value, deviation level (5%+ / 10%+) and sorting.
+- **Daily Picks**: up to **3 coupons** (adjustable 1–5) with different matches, ≤ 3 legs each and combined odds > 3.00. They are never forced; if nothing qualifies you see "No qualifying value bets found today."
+- **Add odds**: find a known match by typing team names, enter **several bookmakers at once**, or paste odds straight from a bookmaker's page.
+- **Bet builder**: combine selections. Same-match legs use the sport model's joint probability (e.g. "home win + over 2.5" is positively correlated).
+- **Arbitrage finder** with a stake calculator.
+- **Agent analysis** page: what each agent found across today's matches.
+- **Tracker**: automatic settlement, ROI and **Closing Line Value**.
+- **Phone alerts** via Telegram or ntfy (both free) for pricing errors, value bets, arbitrage and new coupons.
+- **Leagues**: 107 competitions (Danish Superliga, La Liga, Allsvenskan, the Big 5, Champions League, Herreligaen, Basketligaen, EHF, NHL, SHL, UFC, ATP/WTA and more). Switch them on or off in the app, or add more in `data/registry/competitions.json`.
+- **Bookmakers**: 51 in the registry. Tick "Mine" for the bookmakers where you have a normal betting account, and picks will only use their prices.
 
-Use **Track coupon** or **Track this selection** to record a bet. Bets settle automatically when results arrive (from a provider or entered manually). **Closing Line Value** compares your odds with the margin-free consensus at kick-off, which is the best long-run test of whether the value detection works.
+## Going live (a website that checks automatically and recommends bets)
 
-## Storage (JSON files, no database)
+1. **Get a small server.** A VPS such as Hetzner CX22 (about €4/month) or DigitalOcean ($6/month) with Docker installed.
+2. **Point a domain** (e.g. `bets.yourdomain.dk`) at the server's IP address.
+3. **Configure:**
+   ```bash
+   cp .env.example .env
+   ```
+   Set `DOMAIN` and a long random `BETFINDER_TOKEN` (anyone who opens the site needs it), plus the API keys you use.
+4. **Start:**
+   ```bash
+   docker compose up -d
+   ```
+   Caddy gets a free HTTPS certificate automatically. The data volume keeps your odds history, settings and tracker across restarts and updates.
+5. In the app, set **auto refresh** (e.g. every 60 minutes between 08:00 and 24:00). Use the credit planner to stay inside your The Odds API plan.
+6. Add **Telegram/ntfy** under Sources. You then get a message on your phone whenever a pricing error, strong value bet, arbitrage or new coupon appears.
+7. On iPhone, open the site in Safari and choose *Share → Add to Home Screen* to use it like an app.
 
-Everything is stored under `data/runtime/` (git-ignored). Writes are atomic: temp file, then fsync, then rename. A corrupt file is moved aside instead of crashing the app.
+Update to a new version with `git pull && docker compose up -d --build`.
 
-| File | Contents |
+Alternatives: Railway or Render also work, as long as you attach a **persistent volume** for `data/runtime`. Run a single process only, because JSON storage is not designed for several workers.
+
+## Storage (JSON files)
+
+Everything is stored under `data/runtime/` (git-ignored): fixtures, odds and price history, team news, statistics, tracker, picks, settings and the provider cache. Writes are atomic, and a corrupt file is moved aside instead of crashing the app.
+
+## Status of the old v1.0 roadmap
+
+| Old roadmap item | Status |
 |---|---|
-| `fixtures.json` | matches (merged across providers by fuzzy team names and kick-off time) |
-| `odds.json` | current prices plus price history per bookmaker |
-| `team_news.json` / `provider_news.json` | manual and provider absences and lineups |
-| `team_stats.json`, `h2h.json` | cached statistics |
-| `bets.json` | tracked bets |
-| `daily_picks.json` | generated coupons (last 30 days) |
-| `settings.json`, `competition_overrides.json` | your settings |
-| `cache/` | provider response cache (saves API quota) |
+| Pinnacle benchmark / de-margining | ✅ Sharp-weighted consensus with 4 margin-removal methods |
+| Green/yellow/red error categories | ✅ Deviation traffic light (thresholds adjustable) |
+| Quarter-Kelly stakes in DKK | ✅ Per selection and per coupon, in your currency |
+| xG screening | ✅ API-Football match statistics or manual xG entry |
+| Daily Picks with correlation protection | ✅ Different matches, independence enforced; now 3 coupons |
+| CLV tracker | ✅ Real tracking, no invented history |
+| Push notifications | ✅ Telegram and ntfy (more reliable on iPhone than web push), plus an installable app |
+| Arbitrage detection | ✅ Pre-match arbitrage finder. ❌ Live "goal delay" exploitation is not built: it needs sub-second live data, and bookmakers void bets placed after events |
+| Direct bookmaker APIs | ✅ The Odds API, odds-api.io (Danske Spil/Eurobet), OddsPapi, API-Sports. Pinnacle's own API needs a funded account and approval |
+| Database | JSON files by choice. The storage layer is isolated, so SQLite can be added later |
+| Bet builder simulator | ✅ Same-match correlation from the sport models |
 
-The app is designed for a **single server process**: `uvicorn main:app` without `--workers`.
-
-## Adding leagues and bookmakers
-
-- **Competition:** add an entry to `data/registry/competitions.json`, with The Odds API sport key and/or the API-Sports league id or name, plus optional model parameters. No code changes needed.
-- **Bookmaker:** add an entry to `data/registry/bookmakers.json`, with provider keys or aliases. Bookmakers a provider returns that are not in the registry still appear, marked as unregistered.
-
-At the user's request, the Danish Superliga, Spanish La Liga and Swedish Allsvenskan are **not** included.
-
-## Configuration
-
-| Environment variable | Purpose |
-|---|---|
-| `ODDS_API_KEY` | The Odds API key |
-| `API_SPORTS_KEY` | API-Sports key |
-| `BETFINDER_TOKEN` | Set this when hosting publicly. All `/api` calls then require the header `X-BetFinder-Token`, and the UI asks for the token once. |
-| `BETFINDER_DATA_DIR` | Alternative data folder |
-
-## Known limitations
-
-- Value estimates are probabilities, not certainties. Betting markets, especially sharp ones, are hard to beat. Use the tracker's CLV numbers to judge the system over time.
-- Injury, suspension and lineup feeds exist for football only (API-Sports). For basketball and handball, enter team news manually in the match view.
-- The Odds API results endpoint is used for settlement. For cup matches decided in extra time, check the settlement manually, because football markets settle on regular time.
-- Player importance is unknown for provider injury data. Set it manually for better accuracy.
-
-*Gambling involves risk. Only stake what you can afford to lose.*
+*Gambling involves risk. Estimates are not guarantees. Only stake what you can afford to lose.*

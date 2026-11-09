@@ -28,12 +28,14 @@ BASES = {
     "football": "https://v3.football.api-sports.io",
     "basketball": "https://v1.basketball.api-sports.io",
     "handball": "https://v1.handball.api-sports.io",
+    "icehockey": "https://v1.hockey.api-sports.io",
 }
 BET_MAP = {
     "football": {"match winner": "h2h", "home/away": "dnb", "goals over/under": "totals",
                  "asian handicap": "spreads", "both teams score": "btts"},
     "basketball": {"home/away": "h2h", "3way result": "h2h3", "over/under": "totals", "asian handicap": "spreads"},
     "handball": {"3way result": "h2h", "home/away": "dnb", "over/under": "totals", "asian handicap": "spreads"},
+    "icehockey": {"3way result": "h2h3", "home/away": "h2h", "over/under": "totals", "asian handicap": "spreads"},
 }
 STATUS = {
     "scheduled": {"NS", "TBD"},
@@ -114,7 +116,7 @@ class ApiSportsProvider:
             return summary
         status = self.repo.provider_status().get(NAME, {})
         per_sport_remaining = status.get("remaining_by_sport", {})
-        for sport in ("football", "basketball", "handball"):
+        for sport in BASES:
             comps = [c for c in competitions if c["sport"] == sport and c.get("providers", {}).get("api_sports")]
             if not comps:
                 continue
@@ -486,7 +488,7 @@ class ApiSportsProvider:
 
     async def _fetch_stats(self, cc, budget, sport, league, team_id, name) -> Optional[TeamStats]:
         params = {"league": league["id"], "season": league["season"], "team": team_id}
-        path = {"football": "/teams/statistics", "basketball": "/statistics", "handball": "/teams/statistics"}[sport]
+        path = {"basketball": "/statistics"}.get(sport, "/teams/statistics")
         resp = _response(await self._get(cc, sport, path, params, 12 * 3600, budget, f"stats {name}"))
         if isinstance(resp, list):
             resp = resp[0] if resp else {}
@@ -519,7 +521,34 @@ class ApiSportsProvider:
                 setattr(stats, f"{attr}_home", _wdl(block, "home"))
                 setattr(stats, f"{attr}_away", _wdl(block, "away"))
         stats.recent = await self._recent(cc, budget, sport, league, team_id)
+        if sport == "football" and self.settings.get("api_sports_fetch_xg", True):
+            await self._xg(cc, budget, stats, team_id)
         return stats
+
+    async def _xg(self, cc, budget, stats: TeamStats, team_id) -> None:
+        """Average expected goals for/against over the last 5 matches (from match statistics).
+        Match statistics never change, so each one is cached for 30 days."""
+        xf, xa = [], []
+        for row in [r for r in stats.recent if r.get("fixture_id")][-5:]:
+            try:
+                items = _response(await self._get(cc, "football", "/fixtures/statistics", {"fixture": row["fixture_id"]},
+                                                  30 * 86400, budget, "xg"))
+            except ProviderError:
+                break
+            mine = other = None
+            for it in items:
+                vals = {str(x.get("type", "")).lower(): x.get("value") for x in it.get("statistics", []) or []}
+                xg = _num(vals.get("expected_goals"))
+                if (it.get("team") or {}).get("id") == team_id:
+                    mine = xg
+                else:
+                    other = xg
+            if mine is not None and other is not None:
+                xf.append(mine)
+                xa.append(other)
+        if len(xf) >= 3:
+            stats.xg_for, stats.xg_against = round(sum(xf) / len(xf), 3), round(sum(xa) / len(xa), 3)
+            stats.xg_games, stats.xg_source = len(xf), NAME
 
     async def _recent(self, cc, budget, sport, league, team_id) -> list[dict]:
         try:
@@ -531,7 +560,7 @@ class ApiSportsProvider:
                     if _status((f.get("status") or {}).get("short", "")) != "finished":
                         continue
                     home = t["home"]["id"] == team_id
-                    rows.append({"date": f.get("date"), "venue": "H" if home else "A",
+                    rows.append({"date": f.get("date"), "venue": "H" if home else "A", "fixture_id": f.get("id"),
                                  "opponent": t["away" if home else "home"]["name"],
                                  "scored": _int(gl.get("home" if home else "away")), "conceded": _int(gl.get("away" if home else "home"))})
             else:

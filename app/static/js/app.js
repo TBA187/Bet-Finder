@@ -8,132 +8,161 @@ const view = $("#view");
 const ESC = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
 const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ESC[c]);
 
-const state = {
-  status: null,
-  scanner: { sport: "", value_only: false, sort: "value" },
-  add: { sport: "football", fixture: null, create: false, market: "h2h", line: "", bookmaker: "danske_spil", result: null },
-  bookmakers: null,
-  markets: {},
-  competitions: {},
-  routeToken: 0,
+const store = {
+  get(k, d) { try { const v = localStorage.getItem(k); return v === null ? d : JSON.parse(v); } catch (_) { return d; } },
+  set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (_) { /* storage blocked */ } },
 };
 
-const SPORT_LABEL = { football: "Football", basketball: "Basketball", handball: "Handball" };
-const SPORT_ICON = { football: "⚽", basketball: "🏀", handball: "🤾" };
-const RISK = { low: ["green", "Low risk"], medium: ["amber", "Medium risk"], high: ["orange", "High risk"], very_high: ["red", "Very high risk"] };
-const STANCE = { supports: ["green", "Supports"], opposes: ["red", "Opposes"], neutral: ["", "Neutral"], no_data: ["", "No data"] };
-const AGENT_STATUS = { ok: ["green", "OK"], partial: ["amber", "Partial"], no_data: ["", "No data"], error: ["red", "Error"] };
-const FLAG = {
-  possible_pricing_error: ["red", "Possible pricing error"], outlier_price: ["orange", "Outlier price"],
-  above_market: ["blue", "Above market"], arbitrage: ["violet", "Arbitrage"],
+const state = {
+  lang: store.get("bf_lang", "en"),
+  status: null,
+  catalog: null,
+  scanner: { category: "", sport: "", value_only: false, sort: "value", min_deviation: "" },
+  add: { sport: "football", fixture: null, create: false, market: "h2h", line: "", rows: 1, result: null },
+  bookmakers: null, markets: {}, competitions: {}, routeToken: 0,
 };
-const PALETTE = ["var(--accent)", "var(--blue)", "var(--amber)", "var(--violet)", "var(--red)"];
+
+// ------------------------------------------------------------------ i18n
+function t(key, vars) {
+  const dict = window.BF_I18N[state.lang] || window.BF_I18N.en;
+  let s = dict[key] ?? window.BF_I18N.en[key] ?? key;
+  if (vars) for (const [k, v] of Object.entries(vars)) s = s.split(`{${k}}`).join(v);
+  return s;
+}
+const locale = () => (state.lang === "da" ? "da-DK" : "en-GB");
+function sportLabel(s) { const sp = state.catalog && state.catalog.sports[s]; return sp ? (sp[state.lang] || sp.en) : s; }
+function sportIcon(s) { const sp = state.catalog && state.catalog.sports[s]; return sp ? sp.icon : ""; }
 
 // ------------------------------------------------------------------ helpers
 const fmtOdds = (o) => (o == null ? "–" : Number(o).toFixed(2));
 const fmtPct = (p, d = 1) => (p == null ? "–" : (p * 100).toFixed(d) + "%");
 const fmtEv = (x) => (x == null ? "–" : (x > 0 ? "+" : "") + Number(x).toFixed(1) + "%");
 const evClass = (x) => (x != null && x > 0 ? "pos" : "neg");
-const riskChip = (r) => (r ? `<span class="chip ${RISK[r][0]}">${RISK[r][1]}</span>` : "");
 const chip = (cls, text) => `<span class="chip ${cls}">${esc(text)}</span>`;
+const RISK_CLS = { low: "green", medium: "amber", high: "orange", very_high: "red" };
+const riskChip = (r) => (r ? chip(RISK_CLS[r], t(`risk_${r}`)) : "");
+const VS_CLS = { positive: "green", negative: "", uncertain: "amber" };
+const valueChip = (v) => (v ? chip(VS_CLS[v], t(`vs_${v}`)) : "");
+const DEV_CLS = { normal: "green", warning: "amber", alert: "red" };
+const devChip = (d) => (d && d !== "normal" ? `<span class="chip ${DEV_CLS[d]}"><i class="light ${d}"></i>${esc(t(`dev_${d}`))}</span>` : "");
+const FLAG_CLS = { possible_pricing_error: "red", outlier_price: "orange", above_market: "blue", arbitrage: "violet" };
+const flagChip = (f) => (FLAG_CLS[f] ? chip(FLAG_CLS[f], t(`flag_${f}`)) : "");
+const SRC_CLS = { live: "green", scraped: "orange", manual: "amber", demo: "violet", historical: "blue", missing: "", confirmed: "green", unconfirmed: "amber" };
+const srcChip = (s) => chip(SRC_CLS[s] ?? "", t(`src_${s}`));
+function sourceKind(src) { return src === "demo" ? "demo" : src === "manual" ? "manual" : src === "scraper" ? "scraped" : "live"; }
 
 function fmtTime(iso) {
   if (!iso) return "–";
-  const d = new Date(iso);
-  const now = new Date();
+  const d = new Date(iso), now = new Date();
   const day = (x) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
   const diff = Math.round((day(d) - day(now)) / 86400000);
-  const time = d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-  if (diff === 0) return `Today ${time}`;
-  if (diff === 1) return `Tomorrow ${time}`;
-  if (diff === -1) return `Yesterday ${time}`;
-  return d.toLocaleDateString([], { weekday: "short", day: "numeric", month: "short" }) + " " + time;
+  const time = d.toLocaleTimeString(locale(), { hour: "2-digit", minute: "2-digit" });
+  if (diff === 0) return `${t("today")} ${time}`;
+  if (diff === 1) return `${t("tomorrow")} ${time}`;
+  if (diff === -1) return `${t("yesterday")} ${time}`;
+  return d.toLocaleDateString(locale(), { weekday: "short", day: "numeric", month: "short" }) + " " + time;
 }
 function ago(min) {
   if (min == null) return "–";
-  if (min < 1) return "just now";
-  if (min < 60) return `${Math.round(min)} min ago`;
-  if (min < 1440) return `${Math.round(min / 60)} h ago`;
-  return `${Math.round(min / 1440)} d ago`;
+  if (min < 1) return t("just_now");
+  if (min < 60) return t("min_ago", { n: Math.round(min) });
+  if (min < 1440) return t("h_ago", { n: Math.round(min / 60) });
+  return t("d_ago", { n: Math.round(min / 1440) });
 }
-function agoIso(iso) { return iso ? ago((Date.now() - new Date(iso).getTime()) / 60000) : "never"; }
+const agoIso = (iso) => (iso ? ago((Date.now() - new Date(iso).getTime()) / 60000) : t("never"));
 
-function toast(msg, ms = 2600) {
-  const t = $("#toast");
-  t.textContent = msg;
-  t.classList.add("show");
+function toast(msg, ms = 2800) {
+  const el = $("#toast");
+  el.textContent = msg;
+  el.classList.add("show");
   clearTimeout(toast._t);
-  toast._t = setTimeout(() => t.classList.remove("show"), ms);
+  toast._t = setTimeout(() => el.classList.remove("show"), ms);
 }
 
 async function api(path, opts = {}) {
   const headers = { "Content-Type": "application/json", ...(opts.headers || {}) };
-  let token = null;
-  try { token = localStorage.getItem("bf_token"); } catch (_) { /* storage blocked */ }
+  const token = store.get("bf_token", null);
   if (token) headers["X-BetFinder-Token"] = token;
   const res = await fetch(path, { ...opts, headers, body: opts.body ? JSON.stringify(opts.body) : undefined });
   if (res.status === 401) {
-    const t = prompt("This BetFinder server requires an access token:");
-    if (t) { try { localStorage.setItem("bf_token", t.trim()); } catch (_) {} return api(path, opts); }
+    const tk = prompt("Access token:");
+    if (tk) { store.set("bf_token", tk.trim()); return api(path, opts); }
   }
   let data = null;
   try { data = await res.json(); } catch (_) { /* empty */ }
   if (!res.ok) {
     let detail = data && data.detail;
     if (Array.isArray(detail)) detail = detail.map((d) => `${(d.loc || []).slice(-1)[0]}: ${d.msg}`).join("; ");
-    throw new Error(detail || `Request failed (${res.status})`);
+    throw new Error(detail || `HTTP ${res.status}`);
   }
   return data;
 }
-
-function skeleton(n = 3) { return Array.from({ length: n }, () => `<div class="skeleton"></div>`).join(""); }
-function errorBox(err) { return `<div class="banner err"><div class="grow"><b>Something went wrong.</b> ${esc(err.message || err)}</div></div>`; }
+const skeleton = (n = 3) => Array.from({ length: n }, () => `<div class="skeleton"></div>`).join("");
+const errorBox = (err) => `<div class="banner err"><div class="grow"><b>${esc(t("error_title"))}</b> ${esc(err.message || err)}</div></div>`;
+const head = (title, sub) => `<h1 class="page-title">${esc(title)}</h1>${sub ? `<div class="page-sub">${sub}</div>` : ""}`;
+const backBtn = () => `<button class="back" data-action="back">${esc(t("back"))}</button>`;
 
 function selLabel(market, sel, home, away, line) {
   const signed = (x) => (x > 0 ? `+${x}` : `${x}`);
-  if (["h2h", "h2h3", "dnb"].includes(market)) return { home: home || "Home", away: away || "Away", draw: "Draw" }[sel] || sel;
+  if (["h2h", "h2h3", "dnb"].includes(market)) return { home: home || "1", away: away || "2", draw: state.lang === "da" ? "Uafgjort" : "Draw" }[sel] || sel;
   if (market === "totals") return `${sel === "over" ? "Over" : "Under"} ${line ?? ""}`;
-  if (market === "spreads") {
-    const l = Number(line || 0);
-    return sel === "home" ? `${home || "Home"} ${signed(l)}` : `${away || "Away"} ${signed(-l)}`;
-  }
-  if (market === "btts") return `BTTS ${sel === "yes" ? "Yes" : "No"}`;
+  if (market === "spreads") { const l = Number(line || 0); return sel === "home" ? `${home || "1"} ${signed(l)}` : `${away || "2"} ${signed(-l)}`; }
+  if (market === "btts") return state.lang === "da" ? `Begge scorer ${sel === "yes" ? "Ja" : "Nej"}` : `BTTS ${sel === "yes" ? "Yes" : "No"}`;
   return sel;
 }
-const MARKET_NAME = {
-  h2h: (s) => (s === "basketball" ? "Moneyline (incl. OT)" : "Match result 1X2"), h2h3: () => "3-way (regulation)",
-  dnb: () => "Draw no bet", totals: (s) => (s === "basketball" ? "Total points" : "Total goals"), spreads: () => "Handicap", btts: () => "Both teams to score",
+function marketName(sport, m) {
+  if (m === "h2h") return state.catalog && state.catalog.sports[sport] && state.catalog.sports[sport].draw ? t("mk_h2h_draw") : t("mk_h2h");
+  return t(`mk_${m}`);
+}
+/** Odds found in pasted text: "2,10  3,40  3,25" or "1.95 / 1.85" (Danish commas allowed). */
+function parsePastedOdds(text) {
+  return (String(text).match(/\d{1,3}[.,]\d{1,3}/g) || []).map((x) => parseFloat(x.replace(",", "."))).filter((v) => v >= 1.01 && v <= 1000);
+}
+
+// --------------------------------------------------------------- builder storage
+const builder = {
+  legs() { return store.get("bf_builder", []); },
+  add(leg) {
+    const legs = this.legs().filter((l) => !(l.fixture_id === leg.fixture_id && l.market_id === leg.market_id));
+    legs.push(leg); store.set("bf_builder", legs.slice(-12));
+  },
+  remove(i) { const legs = this.legs(); legs.splice(i, 1); store.set("bf_builder", legs); },
+  clear() { store.set("bf_builder", []); },
 };
 
-// ------------------------------------------------------------- status/top
+// ------------------------------------------------------------- top / chrome
+function applyLanguage() {
+  document.documentElement.lang = state.lang;
+  $$(".tabbar a").forEach((a) => { const sp = a.querySelector("span"); if (sp) sp.textContent = t(`nav_${a.dataset.tab}`); });
+  $("#langBtn").textContent = state.lang === "da" ? "EN" : "DA";
+  $("#langBtn").title = t("language");
+}
+
 async function loadStatus() {
-  try {
-    state.status = await api("/api/status");
-  } catch (err) {
-    state.status = null;
-  }
+  try { state.status = await api("/api/status"); } catch (_) { state.status = null; }
   renderTop();
 }
 
 function renderTop() {
-  const s = state.status;
-  const pill = $("#sourcePill");
-  const banner = $("#banner");
-  if (!s) { pill.textContent = "Offline"; pill.className = "pill warn"; banner.innerHTML = ""; return; }
-  const configured = s.providers.filter((p) => p.configured);
-  const erroring = configured.filter((p) => p.last_error && (!p.last_ok || p.last_error_at > p.last_ok));
+  const s = state.status, pill = $("#sourcePill"), banner = $("#banner");
+  if (!s) { pill.textContent = t("offline"); pill.className = "pill warn"; banner.innerHTML = ""; return; }
+  const apis = s.providers.filter((p) => p.configured && p.method === "api");
+  const erroring = apis.filter((p) => p.last_error && (!p.last_ok || p.last_error_at > p.last_ok));
+  const methods = (s.last_refresh && s.last_refresh.odds_methods) || [];
   let html = "";
   if (s.demo_mode) {
-    pill.textContent = "Demo data"; pill.className = "pill demo";
-    html += `<div class="banner demo"><div class="grow"><b>Demo mode.</b> All teams, bookmakers and odds shown are fictional examples. Switch it off under <a href="#sources">Sources</a>.</div></div>`;
-  } else if (!configured.length) {
-    pill.textContent = "Manual only"; pill.className = "pill warn";
-    html += `<div class="banner warn"><div class="grow"><b>No live odds source connected.</b> BetFinder never invents odds. Add an API key under <a href="#sources">Sources</a>, <a href="#add">enter odds manually</a>, or try demo mode.</div></div>`;
+    pill.textContent = t("pill_demo"); pill.className = "pill demo";
+    html = `<div class="banner demo"><div class="grow">${t("banner_demo")}</div></div>`;
+  } else if (methods.length === 1 && methods[0] === "scraping") {
+    pill.textContent = t("pill_scraping"); pill.className = "pill orange";
+  } else if (!apis.length) {
+    pill.textContent = t("pill_manual"); pill.className = "pill warn";
+    html = `<div class="banner warn"><div class="grow">${t("banner_none")}</div></div>`;
   } else if (erroring.length) {
-    pill.textContent = "Source error"; pill.className = "pill warn";
-    html += `<div class="banner err"><div class="grow"><b>${esc(erroring[0].label)}:</b> ${esc(erroring[0].last_error)}</div></div>`;
+    pill.textContent = t("pill_error"); pill.className = "pill warn";
+    html = `<div class="banner err"><div class="grow"><b>${esc(erroring[0].label)}:</b> ${esc(erroring[0].last_error)}</div></div>`;
   } else {
-    pill.textContent = `Live · ${configured.length} source${configured.length > 1 ? "s" : ""}`; pill.className = "pill ok";
+    pill.textContent = t("pill_live", { n: apis.length }); pill.className = "pill ok";
   }
   banner.innerHTML = html;
 }
@@ -144,180 +173,221 @@ async function doRefresh() {
   btn.classList.add("spin");
   try {
     const r = await api("/api/refresh", { method: "POST" });
-    if (r.status === "busy") toast("A refresh is already running");
-    else if (r.message) toast(r.message, 4500);
+    if (r.status === "busy") toast(t("refreshing_busy"));
+    else if (r.message) toast(r.message, 5000);
     else {
       const q = (r.providers || []).reduce((a, p) => a + (p.quotes || 0), 0);
       const f = (r.providers || []).reduce((a, p) => a + (p.fixtures || 0), 0);
       const errs = (r.providers || []).flatMap((p) => p.errors || []);
-      toast(errs.length ? `Refreshed with ${errs.length} error(s): ${errs[0]}` : `Refreshed: ${f} matches, ${q} prices${r.demo_fixtures ? " (demo)" : ""}`, 4500);
+      const via = (r.odds_methods || []).includes("scraping") ? t("via_scraping") : (r.odds_methods || []).length ? t("via_api") : "";
+      toast(errs.length ? t("refreshed_err", { n: errs.length, e: errs[0] }) : t("refreshed", { f, q, via }), 5000);
     }
-  } catch (err) {
-    toast(err.message, 4500);
-  } finally {
-    btn.classList.remove("spin");
-    await loadStatus();
-    route();
-  }
+  } catch (err) { toast(err.message, 5000); }
+  finally { btn.classList.remove("spin"); await loadStatus(); route(); }
 }
 
-// --------------------------------------------------------------- scanner
-async function viewScanner(token) {
-  const f = state.scanner;
-  const seg = ["", "football", "basketball", "handball"].map((s) =>
-    `<button data-action="scanSport" data-v="${s}" class="${f.sport === s ? "on" : ""}">${s ? SPORT_ICON[s] + " " + SPORT_LABEL[s] : "All"}</button>`).join("");
-  view.innerHTML = `
-    <h1 class="page-title">Odds scanner</h1>
-    <div class="page-sub">Bookmaker prices compared against a margin-free market price. Value is highlighted, and so are possible pricing errors.</div>
-    <div class="filters">
-      <div class="seg">${seg}</div>
-      <button class="toggle-chip ${f.value_only ? "on" : ""}" data-action="scanValue">Qualifying value only</button>
-      <select class="compact" data-change="scanSort" aria-label="Sort">
-        <option value="value" ${f.sort === "value" ? "selected" : ""}>Sort: best value</option>
-        <option value="kickoff" ${f.sort === "kickoff" ? "selected" : ""}>Sort: kick-off</option>
-        <option value="confidence" ${f.sort === "confidence" ? "selected" : ""}>Sort: confidence</option>
-      </select>
+// ----------------------------------------------------------------- dashboard
+async function viewHome(token) {
+  view.innerHTML = head(t("dash_title"), esc(t("dash_sub"))) + skeleton(3);
+  try {
+    const d = await api("/api/dashboard");
+    if (token !== state.routeToken) return;
+    view.innerHTML = renderHome(d);
+  } catch (err) { view.innerHTML += errorBox(err); }
+}
+
+function briefCard(b) {
+  const fx = b.fixture;
+  return `<div class="card click compact" data-action="openMatch" data-id="${esc(fx.id)}">
+    <div class="fx-meta"><span>${sportIcon(fx.sport)} ${esc(b.competition)} · ${fmtTime(fx.kickoff)}</span><span>${devChip(b.deviation_level)}</span></div>
+    <div class="spread" style="margin-top:4px"><div style="min-width:0"><b>${esc(b.label)}</b> <span class="muted small">· ${esc(fx.home)} vs ${esc(fx.away)}</span>
+      <div class="small muted">${fmtOdds(b.odds)} ${esc(t("at"))} ${esc(b.bookmaker)} · ${esc(t("fair"))} ${fmtOdds(b.fair_odds)} ${srcChip(sourceKind(b.source))}</div></div>
+      <div class="${evClass(b.ev_pct)}" style="font-weight:750;font-size:1.05rem">${fmtEv(b.ev_pct)}</div></div>
+    <div class="flags">${valueChip(b.value_status)} ${riskChip(b.risk_rating)}</div></div>`;
+}
+
+function renderHome(d) {
+  const c = d.counts, st = d.status;
+  const methods = (st.last_refresh && st.last_refresh.odds_methods) || [];
+  const method = st.demo_mode ? t("u_m_demo") : methods.includes("scraping") && !methods.includes("api") ? t("u_m_scraping") : methods.length ? t("u_m_api") : t("u_m_manual");
+  const tile = (k, v, href, cls = "") => `<a class="tile" href="${href}"><div class="k">${esc(k)}</div><div class="v ${cls}">${v}</div></a>`;
+  const tr = d.tracker;
+  return head(t("dash_title"), esc(t("dash_sub"))) + `
+    <div class="card status-strip"><div class="row wrap">
+      <span class="small muted">${esc(t("method_now"))}:</span> <b>${esc(method)}</b>
+      <span class="small muted">· ${esc(t("odds_updated", { t: agoIso(d.odds_updated_at) }))}</span>
+      <a class="small" href="#usage" style="margin-left:auto">${esc(t("more_usage"))} ›</a></div></div>
+    <div class="tiles" style="margin-top:10px">
+      ${tile(t("t_matches"), c.with_odds, "#scanner")}${tile(t("t_value"), c.value_bets, "#scanner", c.value_bets ? "pos" : "")}
+      ${tile(t("t_errors"), c.pricing_errors, "#scanner", c.pricing_errors ? "neg-red" : "")}${tile(t("t_arbs"), c.arbitrage, "#arbitrage")}
     </div>
+    <div class="section-title spread"><span>${esc(t("sec_coupons"))}</span><a class="small" href="#picks">${esc(t("open_picks"))}</a></div>
+    ${d.picks.coupons.length ? `<div class="grid-coupons">${d.picks.coupons.map((cp) => `<a class="card coupon-mini" href="#picks">
+        <div class="spread"><b>${esc(cp.title)}</b>${riskChip(cp.risk_rating)}</div>
+        <div class="row" style="margin-top:6px"><span class="big odds">${fmtOdds(cp.combined_odds)}</span><span class="pos small">${fmtEv(cp.combined_ev_pct)}</span>
+        <span class="small muted">${esc(t("c_legs", { n: cp.legs }))}</span></div></a>`).join("")}</div>`
+      : `<div class="empty small">${esc(d.picks.message || "")}</div>`}
+    <div class="section-title">${esc(t("sec_top_value"))}</div>
+    ${d.top_value.length ? d.top_value.map(briefCard).join("") : `<div class="empty small">${esc(t("none_value"))}</div>`}
+    <div class="section-title">${esc(t("sec_errors"))}</div>
+    ${d.pricing_errors.length ? d.pricing_errors.map(briefCard).join("") : `<div class="empty small">${esc(t("none_errors"))}</div>`}
+    <div class="section-title">${esc(t("sec_drops"))}</div>
+    ${d.dropping.length ? `<div class="card">${d.dropping.map((x) => `<div class="list-row click-row" data-action="openMatch" data-id="${esc(x.fixture.id)}">
+        <div style="min-width:0"><b>${esc(x.label)}</b> <span class="small muted">· ${esc(x.fixture.home)} vs ${esc(x.fixture.away)}</span>
+        <div class="tiny muted">${esc(x.bookmaker)}${x.sharp ? " · sharp" : ""}</div></div>
+        <div class="odds small" style="text-align:right">${fmtOdds(x.from)} → <b>${fmtOdds(x.to)}</b><div class="${x.move_pct < 0 ? "pos" : "neg"} tiny">${fmtEv(x.move_pct)}</div></div></div>`).join("")}</div>`
+      : `<div class="empty small">${esc(t("none_drops"))}</div>`}
+    <div class="section-title spread"><span>${esc(t("sec_tracker"))}</span><a class="small" href="#tracker">${esc(t("see_all"))}</a></div>
+    <div class="tiles">${tile(t("tr_tracked"), tr.tracked, "#tracker")}${tile(t("tr_roi"), tr.roi_pct != null ? fmtEv(tr.roi_pct) : "–", "#tracker", evClass(tr.roi_pct))}
+      ${tile(t("tr_avg_clv"), fmtEv(tr.avg_clv_pct), "#tracker", evClass(tr.avg_clv_pct))}${tile(t("tr_beat"), tr.clv_beat_rate_pct != null ? tr.clv_beat_rate_pct + "%" : "–", "#tracker")}</div>
+    <div class="footer-note">${esc(t("disclaimer"))}</div>`;
+}
+
+// ------------------------------------------------------------------- scanner
+async function viewScanner(token) {
+  const f = state.scanner, cats = state.catalog.categories, sports = state.catalog.sports;
+  const catSeg = ["", ...Object.keys(cats)].map((c) => `<button data-action="scanCat" data-v="${c}" class="${f.category === c ? "on" : ""}">${esc(c ? cats[c][state.lang] || cats[c].en : t("cat_all"))}</button>`).join("");
+  const sportList = Object.entries(sports).filter(([, v]) => !f.category || v.category === f.category);
+  const sportSeg = sportList.length > 1 ? `<div class="seg">${[["", null], ...sportList].map(([k]) => `<button data-action="scanSport" data-v="${k}" class="${f.sport === k ? "on" : ""}">${k ? sportIcon(k) + " " + esc(sportLabel(k)) : esc(t("cat_all"))}</button>`).join("")}</div>` : "";
+  view.innerHTML = head(t("scan_title"), esc(t("scan_sub"))) + `
+    <div class="filters"><div class="seg">${catSeg}</div></div>
+    <div class="filters">${sportSeg}</div>
+    <div class="filters">
+      <button class="toggle-chip ${f.value_only ? "on" : ""}" data-action="scanValue">${esc(t("f_value_only"))}</button>
+      <select class="compact" data-change="scanDev" aria-label="Deviation">
+        <option value="" ${f.min_deviation === "" ? "selected" : ""}>${esc(t("f_dev_all"))}</option>
+        <option value="5" ${f.min_deviation === "5" ? "selected" : ""}>🟡 ${esc(t("f_dev_warn"))}</option>
+        <option value="10" ${f.min_deviation === "10" ? "selected" : ""}>🔴 ${esc(t("f_dev_alert"))}</option></select>
+      <select class="compact" data-change="scanSort" aria-label="Sort">
+        ${["value", "kickoff", "confidence", "deviation"].map((s) => `<option value="${s}" ${f.sort === s ? "selected" : ""}>${esc(t(s === "confidence" ? "sort_conf" : s === "deviation" ? "sort_dev" : `sort_${s}`))}</option>`).join("")}
+      </select></div>
     <div id="scanList">${skeleton(3)}</div>`;
   const q = new URLSearchParams({ sort: f.sort });
   if (f.sport) q.set("sport", f.sport);
+  else if (f.category) q.set("category", f.category);
   if (f.value_only) q.set("value_only", "true");
+  if (f.min_deviation) q.set("min_deviation", f.min_deviation);
   try {
     const data = await api(`/api/scanner?${q}`);
     if (token !== state.routeToken) return;
     $("#scanList").innerHTML = renderScanList(data);
-  } catch (err) {
-    $("#scanList").innerHTML = errorBox(err);
-  }
+  } catch (err) { $("#scanList").innerHTML = errorBox(err); }
 }
 
 function renderScanList(data) {
   if (!data.items.length) {
-    const extra = data.fixtures_without_odds ? `<div class="small" style="margin-top:6px">${data.fixtures_without_odds} upcoming match(es) have no prices yet.</div>` : "";
-    return `<div class="empty"><div class="big">No matches with odds to show</div>
-      Refresh the data sources, <a href="#add">enter odds manually</a>, or change the filters.${extra}</div>`;
+    return `<div class="empty"><div class="big">${esc(t("scan_empty"))}</div>${t("scan_empty_sub")}
+      ${data.fixtures_without_odds ? `<div class="small" style="margin-top:6px">${esc(t("without_prices", { n: data.fixtures_without_odds }))}</div>` : ""}</div>`;
   }
-  const head = `<div class="small muted" style="margin-bottom:8px">${data.items.length} match(es)${data.fixtures_without_odds ? ` · ${data.fixtures_without_odds} without prices` : ""}</div>`;
-  return head + data.items.map(scanCard).join("");
+  return `<div class="small muted" style="margin-bottom:8px">${esc(t("n_matches", { n: data.items.length }))}${data.fixtures_without_odds ? " · " + esc(t("without_prices", { n: data.fixtures_without_odds })) : ""}</div>` + data.items.map(scanCard).join("");
 }
 
 function scanCard(it) {
-  const fx = it.fixture;
-  const h = it.headline;
-  const err = it.flags.includes("possible_pricing_error");
-  const good = h && h.qualifies;
-  let headline = `<div class="headline"><span class="muted small">No positive expected value at current prices</span></div>`;
+  const fx = it.fixture, h = it.headline;
+  const err = it.flags.includes("possible_pricing_error"), good = h && h.qualifies;
+  let headline = `<div class="headline"><span class="muted small">${esc(t("no_ev"))}</span></div>`;
   if (h && h.ev_pct != null) {
-    headline = `<div class="headline ${good ? "good" : ""}">
-      <div style="min-width:0">
-        <div class="sel">${esc(h.label)} <span class="muted small">· ${esc(h.market_label)}</span></div>
-        <div class="small muted">${fmtOdds(h.best.odds)} at ${esc(h.best.name)} · fair ${fmtOdds(h.fair_odds)} · p ${fmtPct(h.final_prob)}</div>
-      </div>
-      <div style="text-align:right">
-        <div class="ev ${evClass(h.ev_pct)}">${fmtEv(h.ev_pct)}</div>
-        <div class="tiny muted">${good ? "qualifies" : "EV"}</div>
-      </div></div>`;
+    headline = `<div class="headline ${good ? "good" : h.value_status === "uncertain" ? "unsure" : ""}">
+      <div style="min-width:0"><div class="sel">${esc(h.label)} <span class="muted small">· ${esc(h.market_label)}</span></div>
+        <div class="small muted">${fmtOdds(h.best.odds)} ${esc(t("at"))} ${esc(h.best.name)} · ${esc(t("fair"))} ${fmtOdds(h.fair_odds)} · p ${fmtPct(h.final_prob)}</div></div>
+      <div style="text-align:right"><div class="ev ${evClass(h.ev_pct)}">${fmtEv(h.ev_pct)}</div><div class="tiny muted">${esc(good ? t("qualifies") : t("ev"))}</div></div></div>`;
   }
   const mm = it.main_market;
-  let mini = "";
-  if (mm) {
-    mini = `<div class="mini-odds" style="--n:${mm.selections.length}">` + mm.selections.map((s) => {
-      const b = mm.best[s];
-      return `<div class="cell"><div class="lbl">${esc(mm.selection_labels[s])}</div>
-        <div class="o odds">${b ? fmtOdds(b.odds) : "–"}</div><div class="bk">${b ? esc(b.name) : ""}</div></div>`;
-    }).join("") + `</div>`;
-  }
+  const mini = mm ? `<div class="mini-odds" style="--n:${mm.selections.length}">` + mm.selections.map((s) => {
+    const b = mm.best[s];
+    return `<div class="cell"><div class="lbl">${esc(mm.selection_labels[s])}</div><div class="o odds">${b ? fmtOdds(b.odds) : "–"}</div><div class="bk">${b ? esc(b.name) : ""}</div></div>`;
+  }).join("") + `</div>` : "";
   const flags = [];
-  for (const f of it.flags) if (FLAG[f]) flags.push(chip(FLAG[f][0], FLAG[f][1]));
+  if (h) flags.push(valueChip(h.value_status), devChip(h.deviation_level));
+  for (const f of it.flags) flags.push(flagChip(f));
   if (h && h.risk_rating && h.ev_pct > 0) flags.push(riskChip(h.risk_rating));
-  if (fx.is_demo) flags.push(chip("violet", "Demo"));
-  if (fx.manual) flags.push(chip("amber", "Manual match"));
-  flags.push(chip("", `${it.n_bookmakers} bookmaker${it.n_bookmakers === 1 ? "" : "s"}`));
-  flags.push(chip("", `${it.agents_with_data}/10 agents with data`));
+  for (const s of [...new Set(it.sources.map(sourceKind))]) flags.push(srcChip(s));
+  if (fx.manual) flags.push(chip("amber", t("manual_match")));
+  flags.push(chip("", t("books", { n: it.n_bookmakers })), chip("", t("agents_data", { n: it.agents_with_data })));
   return `<div class="card click ${err ? "error-suspect" : good ? "value" : ""}" data-action="openMatch" data-id="${esc(fx.id)}">
-    <div class="fx-meta"><span>${SPORT_ICON[fx.sport]} ${esc(it.competition.name)} · ${fmtTime(fx.kickoff)}</span>
-      <span class="conf">Confidence ${it.confidence}<span class="meter"><i style="width:${it.confidence}%"></i></span></span></div>
+    <div class="fx-meta"><span>${sportIcon(fx.sport)} ${esc(it.competition.name)} · ${fmtTime(fx.kickoff)}</span>
+      <span class="conf">${esc(t("confidence"))} ${it.confidence}<span class="meter"><i style="width:${it.confidence}%"></i></span></span></div>
     <div class="fx-teams">${esc(fx.home)}<span class="vs">vs</span>${esc(fx.away)}</div>
-    ${headline}${mini}<div class="flags">${flags.join("")}</div></div>`;
+    ${headline}${mini}<div class="flags">${flags.join("")}</div>
+    <div class="tiny faint" style="margin-top:6px">${esc(t("odds_updated", { t: agoIso(it.odds_updated_at) }))}</div></div>`;
 }
 
-// ------------------------------------------------------------ match view
+// --------------------------------------------------------------- match view
 async function viewMatch(token, id) {
-  view.innerHTML = `<button class="back" data-action="back">‹ Back</button>${skeleton(4)}`;
+  view.innerHTML = backBtn() + skeleton(4);
   try {
     const a = await api(`/api/fixtures/${encodeURIComponent(id)}`);
     if (token !== state.routeToken) return;
     view.innerHTML = renderMatch(a);
-  } catch (err) {
-    view.innerHTML = `<button class="back" data-action="back">‹ Back</button>${errorBox(err)}`;
-  }
+  } catch (err) { view.innerHTML = backBtn() + errorBox(err); }
 }
 
 function renderMatch(a) {
-  const fx = a.fixture;
+  const fx = a.fixture, p = a.confidence_parts, desc = a.model.describe;
   const started = new Date(fx.kickoff) <= new Date();
-  const parts = a.confidence_parts;
-  const warn = a.warnings.length ? `<details class="market" style="margin-top:10px"><summary><span>⚠ ${a.warnings.length} warning(s)</span></summary>
+  let model = `<div class="v">–</div><div class="tiny muted">${esc(t("m_no_model"))}</div>`;
+  let modelTitle = t("m_expected");
+  if (desc && desc.kind === "binary") {
+    modelTitle = t("m_win_probs");
+    model = `<div class="v">${fmtPct(desc.win_home, 0)} – ${fmtPct(desc.win_away, 0)}</div>`;
+  } else if (desc) {
+    model = `<div class="v">${desc.expected_home} – ${desc.expected_away}</div><div class="tiny muted">total ${desc.expected_total}${a.disagreement != null ? " · " + esc(t("m_disagree", { d: a.disagreement.toFixed(2) })) : ""}</div>`;
+  }
+  const warn = a.warnings.length ? `<details class="market" style="margin-top:10px"><summary><span>⚠ ${esc(t("m_warnings", { n: a.warnings.length }))}</span></summary>
       <ul class="small muted" style="margin:0;padding-left:18px">${a.warnings.map((w) => `<li>${esc(w)}</li>`).join("")}</ul></details>` : "";
+  const dataRows = a.data_status.map((d) => `<div class="list-row"><span>${esc(t(`kind_${d.kind}`))}</span>
+      <span class="row">${srcChip(d.status)}<span class="tiny muted">${d.sources.length ? esc(d.sources.join(", ")) + " · " : ""}${d.updated_at ? agoIso(d.updated_at) : ""}</span></span></div>`).join("");
   const sels = a.selections.filter((s) => s.ev_pct != null).sort((x, y) => y.ev_pct - x.ev_pct);
-  const desc = a.model.describe;
-  return `
-  <button class="back" data-action="back">‹ Back</button>
+  return backBtn() + `
   <div class="card">
-    <div class="fx-meta"><span>${SPORT_ICON[fx.sport]} ${esc(a.competition.name)} · ${fmtTime(fx.kickoff)}</span>
-      <span>${fx.is_demo ? chip("violet", "Demo") : ""} ${fx.status !== "scheduled" ? chip("amber", fx.status) : ""}</span></div>
+    <div class="fx-meta"><span>${sportIcon(fx.sport)} ${esc(a.competition.name)} · ${fmtTime(fx.kickoff)}</span><span>${fx.is_demo ? chip("violet", t("demo")) : ""} ${fx.status !== "scheduled" ? chip("amber", fx.status) : ""}</span></div>
     <h1 class="fx-teams" style="font-size:1.25rem">${esc(fx.home)}<span class="vs">vs</span>${esc(fx.away)}</h1>
     <div class="grid-2">
-      <div class="tile" style="padding:9px 11px"><div class="k">Analysis confidence</div><div class="v">${a.confidence}<span class="small muted">/100</span></div>
-        <div class="tiny muted">market ${parts.market}/40 · data ${parts.data}/35 · agreement ${parts.agreement}/15 · freshness ${parts.freshness}/10</div></div>
-      <div class="tile" style="padding:9px 11px"><div class="k">Expected score (model)</div>
-        <div class="v">${desc ? `${desc.expected_home} – ${desc.expected_away}` : "–"}</div>
-        <div class="tiny muted">${desc ? `${desc.unit}, total ${desc.expected_total}` : "No market or model available"}${a.disagreement != null ? ` · agent disagreement ${a.disagreement.toFixed(2)}` : ""}</div></div>
+      <div class="tile static"><div class="k">${esc(t("m_conf"))}</div><div class="v">${a.confidence}<span class="small muted">/100</span></div>
+        <div class="tiny muted">${esc(t("m_conf_parts", { m: p.market, d: p.data, a: p.agreement, f: p.freshness }))}</div></div>
+      <div class="tile static"><div class="k">${esc(modelTitle)}</div>${model}</div>
     </div>
     ${warn}
+    <details class="market" style="margin-top:10px"><summary><span>${esc(t("m_data"))}</span><span class="small muted">${esc(t("odds_updated", { t: agoIso(a.odds_updated_at) }))}</span></summary>${dataRows}</details>
+    ${started ? "" : `<button class="btn ghost small" style="margin-top:10px" data-action="fetchMore" data-fid="${esc(fx.id)}">${esc(t("m_more_books"))}</button>`}
   </div>
-
-  <div class="section-title">Value overview</div>
-  <div class="card sel-list">${sels.length ? sels.slice(0, 12).map((s) => selRow(s, started)).join("") : `<div class="muted small">No probability estimate is available yet (no complete bookmaker market and no model).</div>`}</div>
-
-  <div class="section-title">Bookmaker comparison</div>
-  ${a.markets.map((m, i) => marketTable(m, a.selections, i === 0)).join("") || `<div class="empty">No prices stored.</div>`}
-
+  <div class="section-title">${esc(t("m_value"))}</div>
+  <div class="card sel-list">${sels.length ? sels.slice(0, 14).map((s) => selRow(s, started, fx)).join("") : `<div class="muted small">${esc(t("m_no_estimate"))}</div>`}</div>
+  <div class="section-title">${esc(t("m_compare"))}</div>
+  ${a.markets.map((m, i) => marketTable(m, a.selections, i === 0)).join("") || `<div class="empty">–</div>`}
   ${movementSection(a)}
-
-  <div class="section-title">Analysis agents (10)</div>
+  <div class="section-title">${esc(t("m_agents"))}</div>
   <div class="grid-agents">${a.agents.map(agentCard).join("")}</div>
-
-  <div class="section-title">Team news</div>
+  <div class="section-title">${esc(t("m_news"))}</div>
   ${teamNewsSection(a, started)}
-  <div class="footer-note">Probabilities are estimates, not guarantees. Bet responsibly.</div>`;
+  <div class="footer-note">${esc(t("disclaimer"))}</div>`;
 }
 
-function selRow(s, started) {
-  const flags = (s.pricing_flags || []).map((f) => (FLAG[f] ? chip(FLAG[f][0], FLAG[f][1]) : "")).join(" ");
-  const notAllowed = !s.best_is_allowed ? `<span class="chip amber">not at your bookmakers</span>` : "";
+function selRow(s, started, fx) {
+  const flags = (s.pricing_flags || []).map(flagChip).join(" ");
+  const showWhy = s.qualifies || s.ev_pct > 0;
   return `<div class="sel-row">
     <div><div class="name">${esc(s.label)} <span class="muted small">· ${esc(s.market_label)}</span></div></div>
     <div class="${evClass(s.ev_pct)}" style="font-weight:750;text-align:right">${fmtEv(s.ev_pct)}</div>
     <div class="facts">
-      <span>Best <b class="odds">${fmtOdds(s.best.odds)}</b> ${esc(s.best.name)}</span>
-      <span>Implied <b>${s.implied_pct.toFixed(1)}%</b></span>
-      <span>Est. prob <b>${fmtPct(s.final_prob)}</b></span>
-      <span>Fair <b class="odds">${fmtOdds(s.fair_odds)}</b></span>
-      <span>vs market ${fmtEv(s.market_ev_pct)}</span>
-      <span>Conf ${s.confidence}</span>
+      <span>${esc(t("best"))} <b class="odds">${fmtOdds(s.best.odds)}</b> ${esc(s.best.name)}</span>
+      <span>${esc(t("implied"))} <b>${s.implied_pct.toFixed(1)}%</b></span>
+      <span>${esc(t("est_prob"))} <b>${fmtPct(s.final_prob)}</b></span>
+      <span>${esc(t("fair"))} <b class="odds">${fmtOdds(s.fair_odds)}</b></span>
+      <span>${esc(t("vs_market"))} ${fmtEv(s.market_ev_pct)}</span>
+      ${s.stake_amount > 0 ? `<span>${esc(t("stake"))} <b>${s.stake_amount} ${esc(s.currency)}</b> (${s.kelly_pct}%)</span>` : ""}
     </div>
-    <div class="facts">${riskChip(s.risk_rating)} ${s.qualifies ? chip("green", "Qualifies") : ""} ${flags} ${notAllowed}</div>
-    ${s.qualifies || s.ev_pct > 0 ? `<div class="why">${esc(s.explanation)}${!s.qualifies && s.rejections.length ? `<br><span class="faint">Not qualifying: ${esc(s.rejections.join("; "))}</span>` : ""}</div>` : ""}
-    ${started || !(s.ev_pct > 0) ? "" : `<div style="grid-column:1/-1"><button class="btn ghost small" data-action="trackSel" data-fid="${esc(s.fixture_id)}" data-mid="${esc(s.market_id)}" data-sel="${esc(s.selection)}">Track this selection</button></div>`}
-  </div>`;
+    <div class="facts">${valueChip(s.value_status)} ${devChip(s.deviation_level)} ${riskChip(s.risk_rating)} ${s.qualifies ? chip("green", t("qualifies")) : ""} ${flags} ${srcChip(sourceKind(s.best.source))} ${!s.best_is_allowed ? chip("amber", t("not_mine")) : ""}</div>
+    ${showWhy ? `<div class="why">${esc(s.explanation)}${!s.qualifies && s.rejections.length ? `<br><span class="faint">${esc(t("not_qualifying"))}: ${esc(s.rejections.join("; "))}</span>` : ""}</div>` : ""}
+    <div class="row" style="grid-column:1/-1">
+      ${!started && s.ev_pct > 0 ? `<button class="btn ghost small" data-action="trackSel" data-fid="${esc(s.fixture_id)}" data-mid="${esc(s.market_id)}" data-sel="${esc(s.selection)}">${esc(t("track"))}</button>` : ""}
+      ${started ? "" : `<button class="btn ghost small" data-action="addBuilder" data-fid="${esc(s.fixture_id)}" data-mid="${esc(s.market_id)}" data-sel="${esc(s.selection)}" data-label="${esc(s.label)}" data-match="${esc(fx.home + " vs " + fx.away)}" data-odds="${s.best.odds}">${esc(t("add_builder"))}</button>`}
+    </div></div>`;
 }
 
 function marketTable(m, selections, open) {
-  const sels = m.selections;
-  const cons = m.consensus.probs;
-  const finalBySel = {};
-  for (const s of selections) if (s.market_id === m.market_id) finalBySel[s.selection] = s;
+  const sels = m.selections, cons = m.consensus.probs, fin = {};
+  for (const s of selections) if (s.market_id === m.market_id) fin[s.selection] = s;
   const rows = m.books.map((b) => {
     const cells = sels.map((s) => {
       const o = b.prices[s];
@@ -325,29 +395,22 @@ function marketTable(m, selections, open) {
       const q = (m.quotes[s] || []).find((v) => v.bookmaker === b.bookmaker);
       const isBest = m.best[s] && m.best[s].bookmaker === b.bookmaker;
       const flagged = q && (q.flags.includes("outlier") || q.flags.includes("possible_error"));
-      const edge = q && q.edge_vs_fair_pct != null ? `<span class="sub">${fmtEv(q.edge_vs_fair_pct)}</span>` : "";
-      return `<td class="odds ${isBest ? "best" : ""} ${flagged ? "flagged" : ""}">${fmtOdds(o)}${edge}</td>`;
+      return `<td class="odds ${isBest ? "best" : ""} ${flagged ? "flagged" : ""}">${fmtOdds(o)}${q && q.edge_vs_fair_pct != null ? `<span class="sub">${fmtEv(q.edge_vs_fair_pct)}</span>` : ""}</td>`;
     }).join("");
-    const dotCls = b.source.includes("manual") ? "manual" : b.type;
-    return `<tr><td><span class="bk-name"><span class="dot ${esc(dotCls)}"></span>${esc(b.name)}</span>
-      <span class="sub tiny faint">${b.stale ? "stale · " : ""}${ago(b.age_min)}</span></td>${cells}
+    const dot = b.source.includes("manual") ? "manual" : b.source.includes("scraper") ? "scraped" : b.type;
+    return `<tr><td><span class="bk-name"><span class="dot ${esc(dot)}"></span>${esc(b.name)}</span><span class="sub tiny faint">${b.stale ? esc(t("stale")) + " · " : ""}${ago(b.age_min)}</span></td>${cells}
       <td class="faint">${b.margin_pct != null ? b.margin_pct.toFixed(1) + "%" : "–"}</td></tr>`;
   }).join("");
-  const consRow = cons ? `<tr class="summary"><td>Fair (no margin)</td>${sels.map((s) => `<td class="odds">${fmtOdds(1 / cons[s])}<span class="sub">${fmtPct(cons[s])}</span></td>`).join("")}<td></td></tr>` : "";
-  const finalRow = `<tr class="summary"><td>Final estimate</td>${sels.map((s) => {
-    const f = finalBySel[s];
-    return `<td class="odds">${f && f.fair_odds ? fmtOdds(f.fair_odds) : "–"}<span class="sub">${f ? fmtPct(f.final_prob) : ""}</span></td>`;
-  }).join("")}<td></td></tr>`;
-  const meta = [`${m.consensus.n_books} complete book(s)`, m.consensus.method ? `consensus: ${m.consensus.method}` : "no consensus",
-    m.avg_margin_pct != null ? `avg margin ${m.avg_margin_pct}%` : null, m.arbitrage_pct ? `ARBITRAGE +${m.arbitrage_pct}%` : null].filter(Boolean).join(" · ");
-  return `<details class="market" ${open ? "open" : ""}><summary><span>${esc(m.label)}</span><span class="small muted">${m.books.length} books</span></summary>
+  const consRow = cons ? `<tr class="summary"><td>${esc(t("tbl_fair"))}</td>${sels.map((s) => `<td class="odds">${fmtOdds(1 / cons[s])}<span class="sub">${fmtPct(cons[s])}</span></td>`).join("")}<td></td></tr>` : "";
+  const finRow = `<tr class="summary"><td>${esc(t("tbl_final"))}</td>${sels.map((s) => { const f = fin[s]; return `<td class="odds">${f && f.fair_odds ? fmtOdds(f.fair_odds) : "–"}<span class="sub">${f ? fmtPct(f.final_prob) : ""}</span></td>`; }).join("")}<td></td></tr>`;
+  const meta = t("tbl_meta", { n: m.consensus.n_books, c: m.consensus.method || "–", m: m.avg_margin_pct ?? "–" }) + (m.arbitrage_pct ? ` · ARBITRAGE +${m.arbitrage_pct}%` : "");
+  return `<details class="market" ${open ? "open" : ""}><summary><span>${esc(m.label)}</span><span class="small muted">${esc(t("books", { n: m.books.length }))}</span></summary>
     <div class="small muted" style="margin-bottom:6px">${esc(meta)}</div>
-    <div class="table-wrap"><table class="odds-table"><thead><tr><th>Bookmaker</th>${sels.map((s) => `<th>${esc(m.selection_labels[s])}</th>`).join("")}<th>Margin</th></tr></thead>
-    <tbody>${rows}${consRow}${finalRow}</tbody></table></div>
-    <div class="tiny faint" style="margin-top:6px">Green is the best price. ⚑ marks an outlier or possible error. Small numbers show the edge against the fair price. Dots: <span class="dot sharp"></span> sharp, <span class="dot exchange"></span> exchange, <span class="dot manual"></span> manual.</div>
-  </details>`;
+    <div class="table-wrap"><table class="odds-table"><thead><tr><th>${esc(t("tbl_bookmaker"))}</th>${sels.map((s) => `<th>${esc(m.selection_labels[s])}</th>`).join("")}<th>${esc(t("tbl_margin"))}</th></tr></thead>
+    <tbody>${rows}${consRow}${finRow}</tbody></table></div><div class="tiny faint" style="margin-top:6px">${t("tbl_legend")}</div></details>`;
 }
 
+const PALETTE = ["var(--accent)", "var(--blue)", "var(--amber)", "var(--violet)", "var(--red)"];
 function movementSection(a) {
   const m = a.markets[0];
   if (!m) return "";
@@ -355,652 +418,686 @@ function movementSection(a) {
   for (const s of m.selections) {
     const series = (m.quotes[s] || []).filter((q) => q.history && q.history.length > 1).slice(0, 5);
     if (!series.length) continue;
-    const pts = series.flatMap((q) => q.history.map(([t, o]) => [new Date(t).getTime(), o]));
-    const t0 = Math.min(...pts.map((p) => p[0])), t1 = Math.max(...pts.map((p) => p[0]));
-    const o0 = Math.min(...pts.map((p) => p[1])), o1 = Math.max(...pts.map((p) => p[1]));
-    const x = (t) => (t1 === t0 ? 50 : ((t - t0) / (t1 - t0)) * 100);
-    const y = (o) => (o1 === o0 ? 17 : 32 - ((o - o0) / (o1 - o0)) * 30);
-    const lines = series.map((q, i) => `<polyline style="stroke:${PALETTE[i % PALETTE.length]}" points="${q.history.map(([t, o]) => `${x(new Date(t).getTime()).toFixed(2)},${y(o).toFixed(2)}`).join(" ")}"/>`).join("");
-    const legend = series.map((q, i) => `<span class="tiny" style="color:${PALETTE[i % PALETTE.length]}">${esc(q.name)} ${fmtOdds(q.opening_odds)}→${fmtOdds(q.odds)} (${fmtEv(q.move_pct)})</span>`).join(" ");
-    blocks.push(`<div style="margin-top:8px"><div class="small" style="font-weight:600">${esc(m.selection_labels[s])}</div>
-      <svg class="spark" viewBox="0 0 100 34" preserveAspectRatio="none" role="img" aria-label="Odds movement">${lines}</svg><div class="row wrap">${legend}</div></div>`);
+    const pts = series.flatMap((q) => q.history.map(([ts, o]) => [new Date(ts).getTime(), o]));
+    const t0 = Math.min(...pts.map((x) => x[0])), t1 = Math.max(...pts.map((x) => x[0]));
+    const o0 = Math.min(...pts.map((x) => x[1])), o1 = Math.max(...pts.map((x) => x[1]));
+    const X = (v) => (t1 === t0 ? 50 : ((v - t0) / (t1 - t0)) * 100), Y = (o) => (o1 === o0 ? 17 : 32 - ((o - o0) / (o1 - o0)) * 30);
+    const lines = series.map((q, i) => `<polyline style="stroke:${PALETTE[i % 5]}" points="${q.history.map(([ts, o]) => `${X(new Date(ts).getTime()).toFixed(2)},${Y(o).toFixed(2)}`).join(" ")}"/>`).join("");
+    const legend = series.map((q, i) => `<span class="tiny" style="color:${PALETTE[i % 5]}">${esc(q.name)} ${fmtOdds(q.opening_odds)}→${fmtOdds(q.odds)} (${fmtEv(q.move_pct)})</span>`).join(" ");
+    blocks.push(`<div style="margin-top:8px"><div class="small" style="font-weight:600">${esc(m.selection_labels[s])}</div><svg class="spark" viewBox="0 0 100 34" preserveAspectRatio="none" role="img" aria-label="${esc(t("m_movement"))}">${lines}</svg><div class="row wrap">${legend}</div></div>`);
   }
-  if (!blocks.length) return "";
-  return `<div class="section-title">Odds movement · ${esc(m.label)}</div><div class="card">${blocks.join("")}
-    <div class="tiny faint" style="margin-top:8px">The price history builds up with every refresh. A falling line means the market is backing that selection.</div></div>`;
+  return blocks.length ? `<div class="section-title">${esc(t("m_movement"))} · ${esc(m.label)}</div><div class="card">${blocks.join("")}<div class="tiny faint" style="margin-top:8px">${esc(t("movement_note"))}</div></div>` : "";
 }
 
 function agentCard(ag) {
-  const [cls, label] = AGENT_STATUS[ag.status] || ["", ag.status];
-  const showLean = ag.status === "ok" || ag.status === "partial";
-  const leanBar = (v, l, r) => {
-    const w = Math.abs(v) * 50;
-    const left = v >= 0 ? 50 : 50 - w;
-    return `<div class="lean"><span>${l}</span><div class="bar"><i style="left:${left}%;width:${w}%"></i></div><span>${r}</span></div>`;
-  };
-  const leans = showLean && ["probability", "form", "home_away", "injuries", "suspensions", "lineups", "statistics"].includes(ag.agent)
-    ? leanBar(ag.lean_home, "Away", "Home") + (Math.abs(ag.lean_total) > 0.01 ? leanBar(ag.lean_total, "Less", "More") : "") : "";
-  return `<div class="agent">
-    <div class="top"><span class="nm">${esc(ag.name)}</span><span class="row">${chip(cls, label)}${ag.status !== "no_data" ? `<span class="tiny muted">conf ${Math.round(ag.confidence * 100)}%</span>` : ""}</span></div>
+  const cls = { ok: "green", partial: "amber", no_data: "", error: "red" }[ag.status] || "";
+  const show = ag.status === "ok" || ag.status === "partial";
+  const bar = (v, l, r) => { const w = Math.abs(v) * 50, left = v >= 0 ? 50 : 50 - w; return `<div class="lean"><span>${esc(l)}</span><div class="bar"><i style="left:${left}%;width:${w}%"></i></div><span>${esc(r)}</span></div>`; };
+  const leans = show && ["probability", "form", "home_away", "injuries", "suspensions", "lineups", "statistics"].includes(ag.agent)
+    ? bar(ag.lean_home, t("lean_away"), t("lean_home")) + (Math.abs(ag.lean_total) > 0.01 ? bar(ag.lean_total, t("lean_less"), t("lean_more")) : "") : "";
+  return `<div class="agent ${ag.status === "no_data" ? "dim" : ""}">
+    <div class="top"><span class="nm">${esc(ag.name)}</span><span class="row">${chip(cls, t(`ag_${ag.status}`))}${ag.status !== "no_data" ? `<span class="tiny muted">${esc(t("ag_conf", { c: Math.round(ag.confidence * 100) }))}</span>` : ""}</span></div>
     <div class="summary">${esc(ag.summary)}</div>
     ${ag.findings.length ? `<ul>${ag.findings.map((f) => `<li>${esc(f)}</li>`).join("")}</ul>` : ""}
-    ${ag.warnings.map((w) => `<div class="warn">⚠ ${esc(w)}</div>`).join("")}
-    ${leans}
-    ${ag.data_sources.length ? `<div class="tiny faint" style="margin-top:6px">Sources: ${esc(ag.data_sources.join(", "))}</div>` : ""}
-  </div>`;
+    ${ag.warnings.map((w) => `<div class="warn">⚠ ${esc(w)}</div>`).join("")}${leans}
+    ${ag.data_sources.length ? `<div class="tiny faint" style="margin-top:6px">${esc(t("ag_sources", { s: ag.data_sources.join(", ") }))}</div>` : ""}</div>`;
 }
 
 function teamNewsSection(a, started) {
-  const fx = a.fixture;
-  const tn = a.team_news;
-  const teamName = (side) => (side === "home" ? fx.home : fx.away);
-  const manual = tn.absences.map((x) => `<div class="list-row"><div><b>${esc(x.player)}</b> <span class="muted small">${esc(teamName(x.team))} · ${esc(x.kind)} · ${esc(x.importance)}${x.reason ? " · " + esc(x.reason) : ""}</span></div>
-      ${x.source === "manual" ? `<button class="btn danger small" data-action="delAbsence" data-fid="${esc(fx.id)}" data-aid="${esc(x.id)}">Remove</button>` : chip("", x.source)}</div>`).join("");
-  const prov = tn.provider.absences.map((x) => `<div class="list-row"><div><b>${esc(x.player)}</b> <span class="muted small">${esc(teamName(x.team))} · ${esc(x.kind)}${x.reason ? " · " + esc(x.reason) : ""}</span></div>${chip("blue", x.source)}</div>`).join("");
-  const lu = (side) => {
-    const l = tn.lineups[side];
-    return `<div class="field"><label class="f">${esc(teamName(side))} lineup</label>
-      <div class="row">
-        <select class="input" data-lineup="${side}" data-field="status">
-          ${["unknown", "expected", "confirmed"].map((s) => `<option value="${s}" ${l.status === s ? "selected" : ""}>${s}</option>`).join("")}
-        </select>
-        <select class="input" data-lineup="${side}" data-field="rotated">
-          <option value="" ${l.rotated == null ? "selected" : ""}>Rotation: unknown</option>
-          <option value="true" ${l.rotated === true ? "selected" : ""}>Rotating / resting players</option>
-          <option value="false" ${l.rotated === false ? "selected" : ""}>Full-strength</option>
-        </select>
-      </div></div>`;
-  };
-  return `<div class="card">
-    ${prov ? `<div class="small muted" style="margin-bottom:4px">From ${esc(tn.provider.absences_source)}</div>${prov}` : tn.provider.absences_source ? `<div class="small muted">${esc(tn.provider.absences_source)}: no absences reported.</div>` : `<div class="small muted">No automatic injury feed for this match. Add known absences below and the Injury and Suspension agents will use them.</div>`}
-    ${manual ? `<div class="small muted" style="margin:10px 0 4px">Entered manually</div>${manual}` : ""}
-    <form data-submit="addAbsence" data-fid="${esc(fx.id)}" style="margin-top:12px">
-      <div class="grid-2">
-        <div class="field"><label class="f">Team</label><select class="input" name="team"><option value="home">${esc(fx.home)}</option><option value="away">${esc(fx.away)}</option></select></div>
-        <div class="field" style="margin-top:0"><label class="f">Player</label><input class="input" name="player" required maxlength="80" placeholder="Name"></div>
-        <div class="field" style="margin-top:0"><label class="f">Type</label><select class="input" name="kind"><option value="injury">Injury</option><option value="suspension">Suspension</option><option value="doubtful">Doubtful</option><option value="other">Other</option></select></div>
-        <div class="field" style="margin-top:0"><label class="f">Importance</label><select class="input" name="importance"><option value="key">Key player</option><option value="regular" selected>Regular starter</option><option value="rotation">Rotation</option><option value="unknown">Unknown</option></select></div>
-      </div>
-      <div class="field"><label class="f">Reason (optional)</label><input class="input" name="reason" maxlength="120" placeholder="e.g. hamstring, red card"></div>
-      <button class="btn ghost small" type="submit" style="margin-top:10px">Add absence</button>
-    </form>
-    <div style="margin-top:16px" data-fid="${esc(fx.id)}" id="lineupBox">${lu("home")}${lu("away")}
-      <button class="btn ghost small" data-action="saveLineups" data-fid="${esc(fx.id)}" style="margin-top:10px">Save lineup info</button></div>
-    ${started ? `<form data-submit="setResult" data-fid="${esc(fx.id)}" style="margin-top:18px">
-      <label class="f">Final score (regular time) to settle tracked bets</label>
-      <div class="row"><input class="input" name="score_home" type="number" min="0" required placeholder="${esc(fx.home)}">
-      <input class="input" name="score_away" type="number" min="0" required placeholder="${esc(fx.away)}">
-      <button class="btn small" type="submit">Save</button></div></form>` : ""}
-  </div>`;
+  const fx = a.fixture, tn = a.team_news;
+  const team = (side) => (side === "home" ? fx.home : fx.away);
+  const manual = tn.absences.map((x) => `<div class="list-row"><div><b>${esc(x.player)}</b> <span class="muted small">${esc(team(x.team))} · ${esc(t(`k_${x.kind}`))} · ${esc(t(`i_${x.importance}`))}${x.reason ? " · " + esc(x.reason) : ""}</span></div>
+      ${x.source === "manual" ? `<button class="btn danger small" data-action="delAbsence" data-fid="${esc(fx.id)}" data-aid="${esc(x.id)}">${esc(t("remove"))}</button>` : srcChip(sourceKind(x.source))}</div>`).join("");
+  const prov = tn.provider.absences.map((x) => `<div class="list-row"><div><b>${esc(x.player)}</b> <span class="muted small">${esc(team(x.team))} · ${esc(t(`k_${x.kind}`))}${x.reason ? " · " + esc(x.reason) : ""}</span></div>${srcChip("live")}</div>`).join("");
+  const lu = (side) => { const l = tn.lineups[side]; return `<div class="field"><label class="f">${esc(t("tn_lineup", { t: team(side) }))}</label><div class="row">
+      <select class="input" data-lineup="${side}" data-field="status">${["unknown", "expected", "confirmed"].map((s) => `<option value="${s}" ${l.status === s ? "selected" : ""}>${esc(t(`lu_${s}`))}</option>`).join("")}</select>
+      <select class="input" data-lineup="${side}" data-field="rotated"><option value="" ${l.rotated == null ? "selected" : ""}>${esc(t("rot_unknown"))}</option>
+        <option value="true" ${l.rotated === true ? "selected" : ""}>${esc(t("rot_yes"))}</option><option value="false" ${l.rotated === false ? "selected" : ""}>${esc(t("rot_no"))}</option></select></div></div>`; };
+  const xg = (tn.xg || {});
+  const xgForm = fx.sport === "football" ? `<form data-submit="saveXg" data-fid="${esc(fx.id)}" style="margin-top:16px"><label class="f">${esc(t("xg_title"))}</label>
+      ${["home", "away"].map((side) => `<div class="row" style="margin-top:6px"><span class="small" style="min-width:110px">${esc(team(side))}</span>
+        <input class="input" name="${side}_for" type="number" step="0.01" min="0" max="10" placeholder="${esc(t("xg_for"))}" value="${xg[side] ? xg[side].for : ""}">
+        <input class="input" name="${side}_against" type="number" step="0.01" min="0" max="10" placeholder="${esc(t("xg_against"))}" value="${xg[side] ? xg[side].against : ""}"></div>`).join("")}
+      <div class="tiny faint" style="margin-top:4px">${esc(t("xg_note"))}</div><button class="btn ghost small" type="submit" style="margin-top:8px">${esc(t("xg_save"))}</button></form>` : "";
+  const provHead = prov ? `<div class="small muted" style="margin-bottom:4px">${esc(t("tn_from", { s: tn.provider.absences_source }))}</div>${prov}`
+    : tn.provider.absences_source ? `<div class="small muted">${esc(t("tn_none_reported", { s: tn.provider.absences_source }))}</div>` : `<div class="small muted">${esc(t("tn_no_feed"))}</div>`;
+  return `<div class="card">${provHead}
+    ${manual ? `<div class="small muted" style="margin:10px 0 4px">${esc(t("tn_manual"))}</div>${manual}` : ""}
+    <form data-submit="addAbsence" data-fid="${esc(fx.id)}" style="margin-top:12px"><div class="grid-2">
+      <div class="field"><label class="f">${esc(t("tn_team"))}</label><select class="input" name="team"><option value="home">${esc(fx.home)}</option><option value="away">${esc(fx.away)}</option></select></div>
+      <div class="field" style="margin-top:0"><label class="f">${esc(t("tn_player"))}</label><input class="input" name="player" required maxlength="80"></div>
+      <div class="field" style="margin-top:0"><label class="f">${esc(t("tn_type"))}</label><select class="input" name="kind">${["injury", "suspension", "doubtful", "other"].map((k) => `<option value="${k}">${esc(t(`k_${k}`))}</option>`).join("")}</select></div>
+      <div class="field" style="margin-top:0"><label class="f">${esc(t("tn_importance"))}</label><select class="input" name="importance">${["key", "regular", "rotation", "unknown"].map((k) => `<option value="${k}" ${k === "regular" ? "selected" : ""}>${esc(t(`i_${k}`))}</option>`).join("")}</select></div></div>
+      <div class="field"><label class="f">${esc(t("tn_reason"))}</label><input class="input" name="reason" maxlength="120"></div>
+      <button class="btn ghost small" type="submit" style="margin-top:10px">${esc(t("tn_add"))}</button></form>
+    <div style="margin-top:16px">${lu("home")}${lu("away")}<button class="btn ghost small" data-action="saveLineups" data-fid="${esc(fx.id)}" style="margin-top:10px">${esc(t("tn_save_lineups"))}</button></div>
+    ${xgForm}
+    ${started ? `<form data-submit="setResult" data-fid="${esc(fx.id)}" style="margin-top:18px"><label class="f">${esc(t("result_title"))}</label>
+      <div class="row"><input class="input" name="score_home" type="number" min="0" required placeholder="${esc(fx.home)}"><input class="input" name="score_away" type="number" min="0" required placeholder="${esc(fx.away)}">
+      <button class="btn small" type="submit">${esc(t("save"))}</button></div></form>` : ""}</div>`;
 }
 
-// ------------------------------------------------------------ daily picks
+// --------------------------------------------------------------- daily picks
 async function viewPicks(token) {
-  view.innerHTML = `<h1 class="page-title">Daily Picks</h1><div class="page-sub">Up to two coupons with different matches and at most three legs each, built only from qualifying value bets.</div>${skeleton(2)}`;
+  view.innerHTML = head(t("picks_title")) + skeleton(2);
   try {
     const d = await api("/api/daily-picks");
     if (token !== state.routeToken) return;
     view.innerHTML = renderPicks(d);
-  } catch (err) {
-    view.innerHTML += errorBox(err);
-  }
+  } catch (err) { view.innerHTML += errorBox(err); }
 }
 
 function renderPicks(d) {
   const c = d.criteria;
-  const win = `${fmtTime(d.window.from)} → ${fmtTime(d.window.to)}`;
-  let body = "";
+  let body;
   if (d.message) {
-    const rej = Object.entries(d.diagnostics.rejections || {}).map(([k, v]) => `<li>${esc(k)}: ${v}</li>`).join("");
-    body = `<div class="empty"><div class="big">${esc(d.message)}</div>
-      <div class="small">Checked ${d.diagnostics.matches_in_window} match(es) in the window. ${d.diagnostics.qualifying_selections} qualifying selection(s).</div>
+    const rej = Object.entries(d.diagnostics.rejections || {}).map(([k, v]) => `<li>${esc(t(`rej_${k}`))}: ${v}</li>`).join("");
+    body = `<div class="empty"><div class="big">${esc(d.message)}</div><div class="small">${esc(t("picks_checked", { m: d.diagnostics.matches_in_window, q: d.diagnostics.qualifying_selections }))}</div>
       ${d.diagnostics.note ? `<div class="small" style="margin-top:6px">${esc(d.diagnostics.note)}</div>` : ""}
-      ${rej ? `<div class="small" style="margin-top:10px;text-align:left;display:inline-block">Positive-EV selections were rejected for:<ul style="margin:4px 0 0">${rej}</ul></div>` : ""}
-    </div>`;
+      ${rej ? `<div class="small" style="margin-top:10px;text-align:left;display:inline-block">${esc(t("picks_rejected"))}<ul style="margin:4px 0 0">${rej}</ul></div>` : ""}</div>`;
   } else {
     body = d.coupons.map(couponCard).join("");
-    if (d.coupons.length === 1) body += `<div class="small muted" style="margin-top:10px">Only one coupon met the criteria today. BetFinder never forces a second one.</div>`;
+    if (d.coupons.length < c.max_coupons) body += `<div class="small muted" style="margin-top:10px">${esc(t("picks_fewer", { n: d.coupons.length }))}</div>`;
   }
-  const singles = d.singles.length ? `<div class="section-title">Other qualifying singles</div><div class="card sel-list">${d.singles.map((l) => `
-    <div class="sel-row"><div><div class="name">${esc(l.selection_label)}</div><div class="small muted">${esc(l.match)} · ${esc(l.market_label)}</div></div>
-    <div class="pos" style="font-weight:750">${fmtEv(l.ev_pct)}</div>
-    <div class="facts"><span><b class="odds">${fmtOdds(l.odds)}</b> ${esc(l.bookmaker_name)}</span><span>p <b>${fmtPct(l.probability)}</b></span><span>fair <b>${fmtOdds(l.fair_odds)}</b></span>${riskChip(l.risk_rating)}</div></div>`).join("")}</div>` : "";
-  return `<h1 class="page-title">Daily Picks</h1>
-    <div class="page-sub">Window: ${win}. Coupons are rebuilt from current prices each time you open this page.</div>
-    ${body}${singles}
-    <div class="section-title">Criteria</div>
-    <div class="card small"><dl class="kv">
-      <dt>Min. EV per leg</dt><dd>${c.min_ev_pct}%</dd>
-      <dt>Price vs market fair price</dt><dd>≥ ${c.min_market_edge_pct}%</dd>
-      <dt>Min. confidence</dt><dd>${c.min_confidence}</dd>
-      <dt>Max. risk</dt><dd>${esc(String(c.max_risk).replace("_", " "))}</dd>
-      <dt>Min. leg probability</dt><dd>${fmtPct(c.min_leg_probability, 0)}</dd>
-      <dt>Coupon odds</dt><dd>&gt; ${Number(c.coupon_min_odds).toFixed(2)}, ≤ ${c.coupon_max_legs} legs</dd>
-      <dt>Bookmakers</dt><dd>${c.my_bookmakers.length ? esc(c.my_bookmakers.join(", ")) : "all"}</dd>
-    </dl><div style="margin-top:10px"><a href="#sources">Change criteria</a></div></div>
-    <div class="footer-note">High odds alone never qualify. Each leg needs positive expected value, enough confidence and acceptable risk.<br>Estimates can be wrong. Only stake what you can afford to lose.</div>`;
+  const singles = d.singles.length ? `<div class="section-title">${esc(t("picks_singles"))}</div><div class="card sel-list">${d.singles.map((l) => `
+    <div class="sel-row click-row" data-action="openMatch" data-id="${esc(l.fixture_id)}"><div><div class="name">${esc(l.selection_label)}</div><div class="small muted">${esc(l.match)} · ${esc(l.market_label)}</div></div>
+    <div class="pos" style="font-weight:750">${fmtEv(l.ev_pct)}</div><div class="facts"><span><b class="odds">${fmtOdds(l.odds)}</b> ${esc(l.bookmaker_name)}</span><span>p <b>${fmtPct(l.probability)}</b></span><span>${esc(t("fair"))} <b>${fmtOdds(l.fair_odds)}</b></span>${riskChip(l.risk_rating)}</div></div>`).join("")}</div>` : "";
+  return head(t("picks_title"), esc(t("picks_sub", { n: c.max_coupons })) + "<br>" + esc(t("picks_window", { w: `${fmtTime(d.window.from)} → ${fmtTime(d.window.to)}` }))) + body + singles + `
+    <div class="section-title">${esc(t("criteria"))}</div><div class="card small"><dl class="kv">
+      <dt>${esc(t("cr_ev"))}</dt><dd>${c.min_ev_pct}%</dd><dt>${esc(t("cr_edge"))}</dt><dd>≥ ${c.min_market_edge_pct}%</dd>
+      <dt>${esc(t("cr_conf"))}</dt><dd>${c.min_confidence}</dd><dt>${esc(t("cr_risk"))}</dt><dd>${esc(t(`risk_${c.max_risk}`))}</dd>
+      <dt>${esc(t("cr_prob"))}</dt><dd>${fmtPct(c.min_leg_probability, 0)}</dd><dt>${esc(t("cr_coupon"))}</dt><dd>&gt; ${Number(c.coupon_min_odds).toFixed(2)}, ≤ ${c.coupon_max_legs}</dd>
+      <dt>${esc(t("cr_books"))}</dt><dd>${c.my_bookmakers.length ? esc(c.my_bookmakers.join(", ")) : esc(t("all"))}</dd></dl>
+      <div style="margin-top:10px"><a href="#sources">${esc(t("change_criteria"))}</a></div></div>
+    <div class="footer-note">${t("picks_footer")}</div>`;
 }
 
 function couponCard(cp) {
-  const legs = cp.legs.map((l) => `<div class="leg">
-    <div class="lt"><div><div class="match">${esc(l.match)}</div><div class="small muted">${SPORT_ICON[l.sport]} ${esc(SPORT_LABEL[l.sport])} · ${esc(l.competition)} · ${fmtTime(l.kickoff)}</div></div>${riskChip(l.risk_rating)}</div>
-    <div style="margin-top:6px"><b>${esc(l.selection_label)}</b> <span class="muted small">· ${esc(l.market_label)}</span></div>
-    <div class="facts">
-      <div class="fact"><div class="k">Odds</div><div class="v odds">${fmtOdds(l.odds)}</div></div>
-      <div class="fact"><div class="k">Bookmaker</div><div class="v" style="font-size:0.8rem">${esc(l.bookmaker_name)}</div></div>
-      <div class="fact"><div class="k">Est. prob</div><div class="v">${fmtPct(l.probability)}</div></div>
-      <div class="fact"><div class="k">Fair odds</div><div class="v odds">${fmtOdds(l.fair_odds)}</div></div>
-      <div class="fact"><div class="k">Value</div><div class="v pos">${fmtEv(l.ev_pct)}</div></div>
-      <div class="fact"><div class="k">Confidence</div><div class="v">${l.confidence}</div></div>
-    </div>
-    <div class="small muted">${esc(l.explanation)}</div>
-    <a class="small" href="#match/${encodeURIComponent(l.fixture_id)}">Full analysis ›</a>
-  </div>`).join("");
-  return `<div class="card coupon">
-    <div class="coupon-head"><div><h2 style="font-size:1.1rem">${esc(cp.title)} ${cp.is_demo ? chip("violet", "Demo") : ""}</h2>
-      <div class="small muted">${cp.legs.length} leg(s) · ${riskChip(cp.risk_rating)}</div></div>
-      <div class="coupon-total"><div class="big odds">${fmtOdds(cp.combined_odds)}</div><div class="tiny muted">combined odds</div></div></div>
-    <div class="grid-3" style="margin-bottom:6px">
-      <div class="fact"><div class="k">Win prob</div><div class="v">${fmtPct(cp.combined_probability)}</div></div>
-      <div class="fact"><div class="k">Fair odds</div><div class="v odds">${fmtOdds(cp.combined_fair_odds)}</div></div>
-      <div class="fact"><div class="k">EV</div><div class="v pos">${fmtEv(cp.combined_ev_pct)}</div></div>
-    </div>
-    ${legs}
-    <div class="spread" style="margin-top:10px"><span class="small muted">Kelly stake suggestion: ${cp.stake_pct}% of bankroll (${cp.stake_amount})</span>
-      <button class="btn small" data-action="trackCoupon" data-id="${esc(cp.id)}">Track coupon</button></div>
-  </div>`;
+  const legs = cp.legs.map((l) => `<div class="leg"><div class="lt"><div><div class="match">${esc(l.match)}</div><div class="small muted">${sportIcon(l.sport)} ${esc(sportLabel(l.sport))} · ${esc(l.competition)} · ${fmtTime(l.kickoff)}</div></div>${riskChip(l.risk_rating)}</div>
+    <div style="margin-top:6px"><b>${esc(l.selection_label)}</b> <span class="muted small">· ${esc(l.market_label)}</span> ${devChip(l.deviation_level)} ${srcChip(sourceKind(l.source))}</div>
+    <div class="facts"><div class="fact"><div class="k">${esc(t("l_odds"))}</div><div class="v odds">${fmtOdds(l.odds)}</div></div>
+      <div class="fact"><div class="k">${esc(t("l_book"))}</div><div class="v" style="font-size:0.8rem">${esc(l.bookmaker_name)}</div></div>
+      <div class="fact"><div class="k">${esc(t("l_prob"))}</div><div class="v">${fmtPct(l.probability)}</div></div>
+      <div class="fact"><div class="k">${esc(t("l_fair"))}</div><div class="v odds">${fmtOdds(l.fair_odds)}</div></div>
+      <div class="fact"><div class="k">${esc(t("l_value"))}</div><div class="v pos">${fmtEv(l.ev_pct)}</div></div>
+      <div class="fact"><div class="k">${esc(t("l_conf"))}</div><div class="v">${l.confidence}</div></div></div>
+    <div class="small muted">${esc(l.explanation)}</div><a class="small" href="#match/${encodeURIComponent(l.fixture_id)}">${esc(t("full_analysis"))}</a></div>`).join("");
+  return `<div class="card coupon"><div class="coupon-head"><div><h2 style="font-size:1.1rem">${esc(cp.title)} ${cp.is_demo ? chip("violet", t("demo")) : ""}</h2>
+      <div class="small muted">${esc(t("c_legs", { n: cp.legs.length }))} · ${riskChip(cp.risk_rating)}</div></div>
+      <div class="coupon-total"><div class="big odds">${fmtOdds(cp.combined_odds)}</div><div class="tiny muted">${esc(t("c_combined"))}</div></div></div>
+    <div class="grid-3" style="margin-bottom:6px"><div class="fact"><div class="k">${esc(t("c_winprob"))}</div><div class="v">${fmtPct(cp.combined_probability)}</div></div>
+      <div class="fact"><div class="k">${esc(t("c_fair"))}</div><div class="v odds">${fmtOdds(cp.combined_fair_odds)}</div></div>
+      <div class="fact"><div class="k">${esc(t("c_ev"))}</div><div class="v pos">${fmtEv(cp.combined_ev_pct)}</div></div></div>
+    ${legs}<div class="spread" style="margin-top:10px"><span class="small muted">${esc(t("c_kelly", { p: cp.stake_pct, a: cp.stake_amount, cur: cp.currency || "" }))}</span>
+      <button class="btn small" data-action="trackCoupon" data-id="${esc(cp.id)}">${esc(t("c_track"))}</button></div></div>`;
 }
 
-// --------------------------------------------------------------- add odds
-async function ensureBookmakers() {
-  if (!state.bookmakers) state.bookmakers = await api("/api/bookmakers");
-  return state.bookmakers;
-}
-async function ensureMarkets(sport) {
-  if (!state.markets[sport]) state.markets[sport] = await api(`/api/markets/${sport}`);
-  return state.markets[sport];
-}
-async function ensureCompetitions(sport) {
-  if (!state.competitions[sport]) state.competitions[sport] = (await api(`/api/competitions?sport=${sport}`)).items;
-  return state.competitions[sport];
-}
+// ------------------------------------------------------------------ add odds
+async function ensureBookmakers() { if (!state.bookmakers) state.bookmakers = await api("/api/bookmakers"); return state.bookmakers; }
+async function ensureMarkets(sport) { if (!state.markets[sport]) state.markets[sport] = await api(`/api/markets/${sport}`); return state.markets[sport]; }
+async function ensureCompetitions(sport) { if (!state.competitions[sport]) state.competitions[sport] = (await api(`/api/competitions?sport=${sport}`)).items; return state.competitions[sport]; }
 
 async function viewAdd(token) {
-  view.innerHTML = `<h1 class="page-title">Add odds manually</h1><div class="page-sub">For bookmakers without a data feed (Danske Spil, Eurobet…) or to check a price you see.</div>${skeleton(2)}`;
+  view.innerHTML = head(t("add_title")) + skeleton(2);
   try {
     const st = state.add;
     const [books, markets, comps] = await Promise.all([ensureBookmakers(), ensureMarkets(st.sport), ensureCompetitions(st.sport)]);
     if (token !== state.routeToken) return;
     if (!markets.find((m) => m.market === st.market)) st.market = markets[0].market;
     view.innerHTML = renderAdd(books, markets, comps);
-    updateMarginPreview();
-  } catch (err) {
-    view.innerHTML += errorBox(err);
-  }
+    updateMargins();
+  } catch (err) { view.innerHTML += errorBox(err); }
+}
+
+function sportSelect(current) {
+  const cats = state.catalog.categories;
+  return `<select class="input" data-change="addSport">${Object.entries(cats).sort((a, b) => a[1].order - b[1].order).map(([ck, cv]) =>
+    `<optgroup label="${esc(cv[state.lang] || cv.en)}">${Object.entries(state.catalog.sports).filter(([, v]) => v.category === ck).map(([k]) =>
+      `<option value="${k}" ${k === current ? "selected" : ""}>${sportIcon(k)} ${esc(sportLabel(k))}</option>`).join("")}</optgroup>`).join("")}</select>`;
 }
 
 function renderAdd(books, markets, comps) {
-  const st = state.add;
-  const fx = st.fixture;
-  const seg = ["football", "basketball", "handball"].map((s) => `<button type="button" data-action="addSport" data-v="${s}" class="${st.sport === s ? "on" : ""}">${SPORT_ICON[s]} ${SPORT_LABEL[s]}</button>`).join("");
-  const prio = books.filter((b) => b.priority);
-  const rest = books.filter((b) => !b.priority && !b.unregistered);
-  const opt = (b) => `<option value="${esc(b.key)}" ${st.bookmaker === b.key ? "selected" : ""}>${esc(b.name)}${b.state === "manual_only" ? " (manual only)" : ""}</option>`;
+  const st = state.add, fx = st.fixture;
+  const prio = books.filter((b) => b.priority), rest = books.filter((b) => !b.priority && !b.unregistered);
   const market = markets.find((m) => m.market === st.market) || markets[0];
-  const home = fx ? fx.home : st.home || "Home";
-  const away = fx ? fx.away : st.away || "Away";
+  const home = fx ? fx.home : st.home || "1", away = fx ? fx.away : st.away || "2";
   let matchBlock;
   if (fx) {
-    matchBlock = `<div class="headline good"><div><div class="sel">${esc(fx.home)} vs ${esc(fx.away)}</div><div class="small muted">${esc(fx.competition)} · ${fmtTime(fx.kickoff)}</div></div>
-      <button type="button" class="btn ghost small" data-action="addClearFixture">Change</button></div>`;
+    matchBlock = `<div class="headline good"><div><div class="sel">${esc(fx.home)} vs ${esc(fx.away)}</div><div class="small muted">${esc(fx.competition)} · ${fmtTime(fx.kickoff)}</div></div><button type="button" class="btn ghost small" data-action="addClearFixture">${esc(t("change"))}</button></div>`;
   } else if (st.create) {
-    matchBlock = `<div class="grid-2">
-        <div class="field"><label class="f">Home team</label><input class="input" id="addHome" maxlength="80" value="${esc(st.home || "")}" required></div>
-        <div class="field" style="margin-top:0"><label class="f">Away team</label><input class="input" id="addAway" maxlength="80" value="${esc(st.away || "")}" required></div>
-      </div>
-      <div class="field"><label class="f">Competition</label><select class="input" id="addComp">
-        ${comps.map((c) => `<option value="${esc(c.id)}">${esc(c.name)} (${esc(c.country)})</option>`).join("")}<option value="">Other / not listed</option></select></div>
-      <div class="field"><label class="f">Kick-off (your local time)</label><input class="input" type="datetime-local" id="addKickoff" required></div>
-      <button type="button" class="btn ghost small" style="margin-top:10px" data-action="addToggleCreate">‹ Search known matches instead</button>`;
+    matchBlock = `<div class="grid-2"><div class="field"><label class="f">${esc(t("add_home"))}</label><input class="input" id="addHome" maxlength="80" value="${esc(st.home || "")}"></div>
+      <div class="field" style="margin-top:0"><label class="f">${esc(t("add_away"))}</label><input class="input" id="addAway" maxlength="80" value="${esc(st.away || "")}"></div></div>
+      <div class="field"><label class="f">${esc(t("add_comp"))}</label><select class="input" id="addComp">${comps.map((c) => `<option value="${esc(c.id)}">${esc(c.name)} (${esc(c.country)})</option>`).join("")}<option value="">${esc(t("add_other"))}</option></select></div>
+      <div class="field"><label class="f">${esc(t("add_kickoff"))}</label><input class="input" type="datetime-local" id="addKickoff"></div>
+      <button type="button" class="btn ghost small" style="margin-top:10px" data-action="addToggleCreate">${esc(t("add_search_instead"))}</button>`;
   } else {
-    matchBlock = `<div class="field"><label class="f" for="addSearch">Find the match (type team names)</label>
-      <input class="input" id="addSearch" data-input="addSearch" autocomplete="off" placeholder="e.g. Arsenal Chelsea"></div>
-      <div id="addResults"></div>
-      <button type="button" class="btn ghost small" style="margin-top:10px" data-action="addToggleCreate">Match not listed? Create it</button>`;
+    matchBlock = `<div class="field"><label class="f" for="addSearch">${esc(t("add_find"))}</label><input class="input" id="addSearch" data-input="addSearch" autocomplete="off" placeholder="${esc(t("add_placeholder"))}"></div>
+      <div id="addResults"></div><button type="button" class="btn ghost small" style="margin-top:10px" data-action="addToggleCreate">${esc(t("add_create"))}</button>`;
   }
-  const lineField = market.needs_line ? `<div class="field"><label class="f">${st.market === "spreads" ? "Home handicap (e.g. -1.5)" : "Line (e.g. 2.5)"}</label>
-      <input class="input" id="addLine" type="number" step="0.25" value="${esc(st.line)}" data-input="addLine" required></div>` : "";
-  const priceInputs = market.selections.map((s) => `<div class="field" style="margin-top:0"><label class="f">${esc(selLabel(st.market, s, home, away, st.line || "?"))}</label>
-      <input class="input odds" type="number" inputmode="decimal" step="0.01" min="1.01" data-price="${s}" data-input="addPrice" placeholder="odds"></div>`).join("");
-  return `<h1 class="page-title">Add odds manually</h1>
-  <div class="page-sub">For bookmakers without a data feed (Danske Spil, Eurobet…) or to check a price you see. Pick a known match and you only need to type the odds.</div>
-  <form class="card" data-submit="addOdds">
-    <div class="seg" style="margin-bottom:12px">${seg}</div>
-    ${matchBlock}
-    <div class="grid-2" style="margin-top:12px">
-      <div class="field"><label class="f">Bookmaker</label><select class="input" id="addBook" data-change="addBook">
-        <optgroup label="Priority">${prio.map(opt).join("")}</optgroup><optgroup label="Other European bookmakers">${rest.map(opt).join("")}</optgroup></select></div>
-      <div class="field" style="margin-top:0"><label class="f">Market</label><select class="input" id="addMarket" data-change="addMarket">
-        ${markets.map((m) => `<option value="${m.market}" ${m.market === st.market ? "selected" : ""}>${esc(MARKET_NAME[m.market](st.sport))}</option>`).join("")}</select></div>
-    </div>
-    ${lineField}
-    <div class="grid-3" style="margin-top:12px;grid-template-columns:repeat(${market.selections.length},1fr)">${priceInputs}</div>
-    <div id="marginPreview" class="small muted" style="margin-top:8px">Enter all prices to see the bookmaker margin.</div>
-    <button class="btn block" type="submit" style="margin-top:14px">Save odds and analyse</button>
-  </form>
-  <div id="addResult">${st.result ? renderAddResult(st.result) : ""}</div>`;
+  const opt = (b, sel) => `<option value="${esc(b.key)}" ${sel === b.key ? "selected" : ""}>${esc(b.name)}${b.state === "manual_only" ? esc(t("manual_only_suffix")) : ""}</option>`;
+  const defaults = ["danske_spil", "nordicbet", "eurobet", "bet365", "unibet"];
+  const rows = Array.from({ length: st.rows }, (_, r) => `<div class="price-row" data-row="${r}">
+      <div class="spread"><select class="input" data-book="${r}"><optgroup label="${esc(t("prio"))}">${prio.map((b) => opt(b, defaults[r] || "")).join("")}</optgroup><optgroup label="${esc(t("others"))}">${rest.map((b) => opt(b, defaults[r] || "")).join("")}</optgroup></select>
+      ${st.rows > 1 ? `<button type="button" class="btn danger small" data-action="addRemoveRow" data-row="${r}">${esc(t("add_remove_row"))}</button>` : ""}</div>
+      <textarea class="input paste" rows="1" data-input="addPaste" data-row="${r}" placeholder="${esc(t("add_paste_ph"))}"></textarea>
+      <div class="grid-3" style="margin-top:8px;grid-template-columns:repeat(${market.selections.length},1fr)">${market.selections.map((s) => `<div><label class="f" data-sel-label="${s}">${esc(selLabel(st.market, s, home, away, st.line || "?"))}</label>
+        <input class="input odds" type="number" inputmode="decimal" step="0.01" min="1.01" data-price="${s}" data-input="addPrice"></div>`).join("")}</div>
+      <div class="small muted margin-preview" style="margin-top:6px">${esc(t("add_margin_hint"))}</div></div>`).join("");
+  return head(t("add_title"), esc(t("add_sub"))) + `<form class="card" data-submit="addOdds">
+    <div class="field" style="margin-top:0"><label class="f">Sport</label>${sportSelect(st.sport)}</div>
+    <div style="margin-top:12px">${matchBlock}</div>
+    <div class="field"><label class="f">${esc(t("add_market"))}</label><select class="input" id="addMarket" data-change="addMarket">${markets.map((m) => `<option value="${m.market}" ${m.market === st.market ? "selected" : ""}>${esc(marketName(st.sport, m.market))}</option>`).join("")}</select></div>
+    ${market.needs_line ? `<div class="field"><label class="f">${esc(st.market === "spreads" ? t("add_line_sp") : t("add_line"))}</label><input class="input" id="addLine" type="number" step="0.25" value="${esc(st.line)}" data-input="addLine"></div>` : ""}
+    <div class="field"><label class="f">${esc(t("add_book"))}</label><div class="tiny faint" style="margin-bottom:6px">${esc(t("add_paste_hint"))}</div>${rows}</div>
+    <button type="button" class="btn ghost small" data-action="addRow" style="margin-top:8px">${esc(t("add_row"))}</button>
+    <button class="btn block" type="submit" style="margin-top:14px">${esc(t("add_submit"))}</button></form>
+    <div id="addResult">${st.result ? renderAddResult(st.result) : ""}</div>`;
 }
 
-function updateMarginPreview() {
-  const box = $("#marginPreview");
-  if (!box) return;
-  const vals = $$("[data-price]").map((i) => parseFloat(i.value));
-  const valid = vals.filter((v) => v >= 1.01);
-  if (!valid.length) { box.textContent = "Enter all prices to see the bookmaker margin."; return; }
-  const implied = valid.map((v) => (100 / v).toFixed(1) + "%").join(" / ");
-  if (valid.length === vals.length) {
-    const margin = (valid.reduce((a, v) => a + 1 / v, 0) - 1) * 100;
-    box.innerHTML = `Implied: ${esc(implied)} · Margin <b>${margin.toFixed(2)}%</b>${margin < 0 ? " (below 0: check the prices)" : ""}`;
-  } else box.textContent = `Implied: ${implied}`;
+function updateMargins() {
+  for (const row of $$(".price-row")) {
+    const vals = $$("[data-price]", row).map((i) => parseFloat(i.value));
+    const valid = vals.filter((v) => v >= 1.01), box = $(".margin-preview", row);
+    if (!valid.length) { box.textContent = t("add_margin_hint"); continue; }
+    const implied = valid.map((v) => (100 / v).toFixed(1) + "%").join(" / ");
+    if (valid.length === vals.length) {
+      const margin = (valid.reduce((a, v) => a + 1 / v, 0) - 1) * 100;
+      box.innerHTML = `${esc(t("add_implied", { i: implied }))} · ${t("add_margin", { m: margin.toFixed(2) })}${margin < 0 ? esc(t("add_margin_neg")) : ""}`;
+    } else box.textContent = t("add_implied", { i: implied });
+  }
+}
+
+function onPaste(el) {
+  const odds = parsePastedOdds(el.value);
+  const row = el.closest(".price-row");
+  const inputs = $$("[data-price]", row);
+  if (!odds.length) return;
+  inputs.forEach((inp, i) => { if (odds[i] != null) inp.value = odds[i].toFixed(2); });
+  updateMargins();
+  if (odds.length >= inputs.length) toast(t("add_paste_done", { n: Math.min(odds.length, inputs.length) }));
 }
 
 function renderAddResult(r) {
   const fx = r.fixture;
-  const rows = r.selections.filter((s) => s.best).map((s) => {
-    const own = (r.market.quotes[s.selection] || []).find((q) => q.bookmaker === r.bookmaker);
-    if (!own) return "";
-    const p = s.final_prob;
-    const ev = p != null ? (p * own.odds - 1) * 100 : null;
-    const bestElsewhere = s.best_overall.bookmaker !== r.bookmaker ? `${fmtOdds(s.best_overall.odds)} at ${esc(s.best_overall.name)}` : "this is the best price";
-    return `<div class="sel-row"><div class="name">${esc(s.label)}</div><div class="${evClass(ev)}" style="font-weight:750">${fmtEv(ev)}</div>
-      <div class="facts"><span>Your price <b class="odds">${fmtOdds(own.odds)}</b></span><span>Implied <b>${own.implied_pct.toFixed(1)}%</b></span>
-      <span>Est. prob <b>${fmtPct(p)}</b></span><span>Fair <b class="odds">${fmtOdds(s.fair_odds)}</b></span><span>Best: ${bestElsewhere}</span></div></div>`;
+  const blocks = r.bookmakers.map((bk, i) => {
+    const rows = r.selections.map((s) => {
+      const own = ((r.market && r.market.quotes[s.selection]) || []).find((q) => q.bookmaker === bk);
+      if (!own) return "";
+      const p = s.final_prob, ev = p != null ? (p * own.odds - 1) * 100 : null;
+      const bestTxt = s.best_overall.bookmaker !== bk ? t("best_elsewhere", { o: fmtOdds(s.best_overall.odds), b: s.best_overall.name }) : t("best_is_this");
+      return `<div class="sel-row"><div class="name">${esc(s.label)}</div><div class="${evClass(ev)}" style="font-weight:750">${fmtEv(ev)}</div>
+        <div class="facts"><span>${esc(t("your_price"))} <b class="odds">${fmtOdds(own.odds)}</b></span><span>${esc(t("implied"))} <b>${own.implied_pct.toFixed(1)}%</b></span>
+        <span>${esc(t("est_prob"))} <b>${fmtPct(p)}</b></span><span>${esc(t("fair"))} <b class="odds">${fmtOdds(s.fair_odds)}</b></span><span>${esc(t("best"))}: ${esc(bestTxt)}</span></div></div>`;
+    }).join("");
+    return `<div style="margin-top:10px"><b>${esc(r.bookmaker_names[i])}</b><div class="sel-list">${rows}</div></div>`;
   }).join("");
   const single = r.market && r.market.consensus.n_books <= 1;
-  return `<div class="card" style="margin-top:12px">
-    <div class="spread"><div><b>Saved: ${esc(r.bookmaker_name)}</b> <span class="muted small">· ${esc(fx.home)} vs ${esc(fx.away)}</span></div>${chip("blue", r.matched_by)}</div>
-    ${r.margin_pct != null ? `<div class="small muted" style="margin-top:4px">Bookmaker margin on this market: ${r.margin_pct}%</div>` : ""}
-    ${single ? `<div class="banner warn" style="margin-top:8px"><div class="grow">This is the only bookmaker priced for this market. Without other prices or a statistical model, the fair probability is just this bookmaker's own price minus its margin, so value can't be detected. Add a second bookmaker (ideally a sharp one like Pinnacle) for a real comparison.</div></div>` : ""}
-    <div class="sel-list" style="margin-top:6px">${rows || `<div class="small muted">No estimate available.</div>`}</div>
-    <a class="btn ghost small" style="margin-top:10px" href="#match/${encodeURIComponent(fx.id)}">Open full analysis</a>
-  </div>`;
+  return `<div class="card" style="margin-top:12px"><div class="spread"><div><b>${esc(t("add_saved_title", { b: r.bookmaker_names.join(", ") }))}</b> <span class="muted small">· ${esc(fx.home)} vs ${esc(fx.away)}</span></div>${chip("blue", r.matched_by)}</div>
+    ${single ? `<div class="banner warn" style="margin-top:8px"><div class="grow">${esc(t("add_single"))}</div></div>` : ""}${blocks}
+    <a class="btn ghost small" style="margin-top:10px" href="#match/${encodeURIComponent(fx.id)}">${esc(t("open_analysis"))}</a></div>`;
 }
 
 let searchTimer = null;
 function onAddSearch(input) {
   clearTimeout(searchTimer);
-  const q = input.value.trim();
-  const box = $("#addResults");
+  const q = input.value.trim(), box = $("#addResults");
   if (q.length < 2) { box.innerHTML = ""; return; }
   searchTimer = setTimeout(async () => {
     try {
       const items = await api(`/api/fixtures/search?q=${encodeURIComponent(q)}&sport=${state.add.sport}`);
       state.add._search = items;
-      box.innerHTML = items.length ? `<div class="results-list">${items.map((f, i) => `<button type="button" data-action="addPick" data-i="${i}">
-          <b>${esc(f.home)} vs ${esc(f.away)}</b> ${f.is_demo ? chip("violet", "Demo") : ""}<div class="small muted">${esc(f.competition)} · ${fmtTime(f.kickoff)}</div></button>`).join("")}</div>`
-        : `<div class="small muted" style="margin-top:6px">No known match found. Use "Match not listed? Create it".</div>`;
+      box.innerHTML = items.length ? `<div class="results-list">${items.map((f, i) => `<button type="button" data-action="addPick" data-i="${i}"><b>${esc(f.home)} vs ${esc(f.away)}</b> ${f.is_demo ? chip("violet", t("demo")) : ""}<div class="small muted">${esc(f.competition)} · ${fmtTime(f.kickoff)}</div></button>`).join("")}</div>`
+        : `<div class="small muted" style="margin-top:6px">${esc(t("add_none_found"))}</div>`;
     } catch (err) { box.innerHTML = errorBox(err); }
   }, 250);
 }
 
 async function submitAddOdds(form) {
   const st = state.add;
-  const prices = {};
-  for (const i of $$("[data-price]", form)) if (i.value) prices[i.dataset.price] = parseFloat(i.value);
-  if (!Object.keys(prices).length) return toast("Enter at least one price");
-  const body = { bookmaker: $("#addBook").value, market: st.market, prices };
+  const rows = $$(".price-row", form).map((row) => {
+    const prices = {};
+    for (const i of $$("[data-price]", row)) if (i.value) prices[i.dataset.price] = parseFloat(i.value);
+    return { bookmaker: $("[data-book]", row).value, prices };
+  }).filter((r) => Object.keys(r.prices).length);
+  if (!rows.length) return toast(t("add_need_price"));
+  const body = { market: st.market, rows };
   if (st.market === "totals" || st.market === "spreads") {
     const l = $("#addLine").value;
-    if (l === "") return toast("Enter the line");
+    if (l === "") return toast(t("add_need_line"));
     body.line = parseFloat(l);
   }
   if (st.fixture) body.fixture_id = st.fixture.id;
   else if (st.create) {
-    body.sport = st.sport;
-    body.home = $("#addHome").value.trim();
-    body.away = $("#addAway").value.trim();
+    Object.assign(body, { sport: st.sport, home: $("#addHome").value.trim(), away: $("#addAway").value.trim() });
     const comp = $("#addComp").value;
     if (comp) body.competition_id = comp; else body.competition_name = "Other";
     const k = $("#addKickoff").value;
     if (k) body.kickoff = new Date(k).toISOString();
     st.home = body.home; st.away = body.away;
-  } else return toast("Pick a match first, or create it");
+  } else return toast(t("add_need_match"));
   try {
-    const r = await api("/api/manual/odds", { method: "POST", body });
+    const r = await api("/api/manual/odds-multi", { method: "POST", body });
     st.result = r;
     st.fixture = { id: r.fixture.id, home: r.fixture.home, away: r.fixture.away, competition: r.fixture.competition, kickoff: r.fixture.kickoff };
-    st.create = false;
-    state.bookmakers = null;
-    toast("Odds saved");
+    st.create = false; state.bookmakers = null;
+    toast(t("add_saved"));
     route();
   } catch (err) { toast(err.message, 5000); }
 }
 
-// --------------------------------------------------------------- tracker
+// ---------------------------------------------------------------------- more
+function viewMore() {
+  const item = (href, title, d, icon) => `<a class="card click menu-item" href="${href}"><span class="mi">${icon}</span><div><b>${esc(t(title))}</b><div class="small muted">${esc(t(d))}</div></div><span class="faint">›</span></a>`;
+  view.innerHTML = head(t("more_title")) +
+    item("#agents", "more_agents", "more_agents_d", "🧠") + item("#arbitrage", "more_arb", "more_arb_d", "♻") +
+    item("#builder", "more_builder", "more_builder_d", "🧩") + item("#tracker", "more_tracker", "more_tracker_d", "📈") +
+    item("#usage", "more_usage", "more_usage_d", "📊") + item("#sources", "more_sources", "more_sources_d", "⚙") +
+    `<div class="card spread" style="margin-top:10px"><b>${esc(t("language"))}</b><div class="seg"><button data-action="setLang" data-v="en" class="${state.lang === "en" ? "on" : ""}">English</button><button data-action="setLang" data-v="da" class="${state.lang === "da" ? "on" : ""}">Dansk</button></div></div>`;
+}
+
+// -------------------------------------------------------------------- agents
+async function viewAgents(token) {
+  view.innerHTML = backBtn() + head(t("agents_title"), esc(t("agents_sub"))) + skeleton(3);
+  try {
+    const list = await api("/api/agents");
+    if (token !== state.routeToken) return;
+    view.innerHTML = backBtn() + head(t("agents_title"), esc(t("agents_sub"))) + `<div class="grid-agents">${list.map((a) => {
+      const pct = a.total ? Math.round((a.with_data / a.total) * 100) : 0;
+      return `<div class="agent"><div class="top"><span class="nm">${esc(a.name || a.agent)}</span><span class="tiny muted">${esc(t("agents_cov", { a: a.with_data, t: a.total }))}</span></div>
+        <div class="summary muted">${esc(t(`desc_${a.agent}`))}</div><div class="meter wide"><i style="width:${pct}%"></i></div>
+        ${a.avg_confidence != null ? `<div class="tiny muted" style="margin-top:4px">${esc(t("agents_avg", { c: Math.round(a.avg_confidence * 100) }))}</div>` : ""}
+        ${a.highlights.length ? `<ul>${a.highlights.map((h) => `<li><a href="#match/${encodeURIComponent(h.fixture_id)}">${esc(h.match)}</a>: ${esc(h.warning || h.summary)}</li>`).join("")}</ul>` : `<div class="tiny faint" style="margin-top:6px">${esc(t("agents_none"))}</div>`}</div>`;
+    }).join("")}</div>`;
+  } catch (err) { view.innerHTML += errorBox(err); }
+}
+
+// ----------------------------------------------------------------- arbitrage
+async function viewArbitrage(token) {
+  const stake = store.get("bf_arb_stake", 100);
+  const top = backBtn() + head(t("arb_title"), esc(t("arb_sub"))) + `<div class="card row"><label class="f" style="margin:0">${esc(t("arb_stake"))}</label><input class="input" style="max-width:140px" type="number" min="1" step="1" value="${stake}" data-change="arbStake"></div>`;
+  view.innerHTML = top + skeleton(2);
+  try {
+    const list = await api(`/api/arbitrage?stake=${encodeURIComponent(stake)}`);
+    if (token !== state.routeToken) return;
+    view.innerHTML = top + (list.length ? list.map((x) => `<div class="card" style="margin-top:10px">
+      <div class="fx-meta"><span>${sportIcon(x.fixture.sport)} ${esc(x.competition)} · ${fmtTime(x.fixture.kickoff)}</span>${x.fixture.is_demo ? chip("violet", t("demo")) : ""}</div>
+      <div class="spread"><a href="#match/${encodeURIComponent(x.fixture.id)}"><b>${esc(x.fixture.home)} vs ${esc(x.fixture.away)}</b></a><span class="pos" style="font-weight:750">+${x.profit_pct}%</span></div>
+      <div class="small muted">${esc(x.market_label)} · ${esc(t("arb_profit", { p: x.profit_pct, a: x.profit_amount }))}</div>
+      <ul class="small" style="margin:8px 0 0;padding-left:18px">${x.legs.map((l) => `<li>${esc(t("arb_place", { s: l.stake, l: l.label, o: fmtOdds(l.odds), b: l.bookmaker }))} ${l.flags.includes("stale") ? chip("amber", t("stale")) : ""}</li>`).join("")}</ul></div>`).join("")
+      : `<div class="empty" style="margin-top:10px">${esc(t("arb_none"))}</div>`);
+  } catch (err) { view.innerHTML += errorBox(err); }
+}
+
+// ------------------------------------------------------------------- builder
+async function viewBuilder(token) {
+  const legs = builder.legs();
+  const offered = store.get("bf_builder_offered", "");
+  let html = backBtn() + head(t("b_title"), esc(t("b_sub")));
+  if (!legs.length) { view.innerHTML = html + `<div class="empty">${esc(t("b_empty"))}</div>`; return; }
+  html += `<div class="card">${legs.map((l, i) => `<div class="list-row"><div><b>${esc(l.label)}</b> <span class="small muted">· ${esc(l.match)}</span></div>
+      <span class="row"><span class="odds">${fmtOdds(l.odds)}</span><button class="btn danger small" data-action="builderRemove" data-i="${i}">${esc(t("remove"))}</button></span></div>`).join("")}
+    <div class="row wrap" style="margin-top:10px"><label class="f" style="margin:0">${esc(t("b_offered"))}</label><input class="input" style="max-width:120px" id="builderOffered" type="number" step="0.01" min="1.01" value="${esc(offered)}">
+      <button class="btn small" data-action="builderCalc">${esc(t("b_calc"))}</button><button class="btn ghost small" data-action="builderClear">${esc(t("b_clear"))}</button></div></div><div id="builderOut">${skeleton(1)}</div>`;
+  view.innerHTML = html;
+  await builderCalc(token);
+}
+
+async function builderCalc(token) {
+  const legs = builder.legs();
+  const offered = parseFloat(($("#builderOffered") || {}).value) || null;
+  store.set("bf_builder_offered", offered || "");
+  try {
+    const r = await api("/api/builder", { method: "POST", body: { legs: legs.map((l) => ({ fixture_id: l.fixture_id, market_id: l.market_id, selection: l.selection })), offered_odds: offered } });
+    if (token != null && token !== state.routeToken) return;
+    const groups = r.groups.filter((g) => g.legs > 1).map((g) => g.modelled
+      ? `<div class="small">${esc(t("b_corr", { r: g.correlation, i: fmtPct(g.independent_probability) }))}</div>` : `<div class="small" style="color:var(--amber)">${esc(t("b_corr_not"))}</div>`).join("");
+    $("#builderOut").innerHTML = `<div class="tiles" style="margin-top:10px">
+      <div class="tile static"><div class="k">${esc(t("b_naive"))}</div><div class="v odds">${fmtOdds(r.naive_combined_odds)}</div></div>
+      <div class="tile static"><div class="k">${esc(t("b_prob"))}</div><div class="v">${fmtPct(r.probability)}</div></div>
+      <div class="tile static"><div class="k">${esc(t("b_fair"))}</div><div class="v odds">${fmtOdds(r.fair_odds)}</div></div>
+      <div class="tile static"><div class="k">${esc(t("b_ev", { o: fmtOdds(r.offered_odds || r.naive_combined_odds) }))}</div><div class="v ${evClass(r.ev_pct)}">${fmtEv(r.ev_pct)}</div></div></div>
+      <div class="card" style="margin-top:10px">${groups}<div class="tiny faint">${esc(t("disclaimer"))}</div></div>`;
+  } catch (err) { $("#builderOut").innerHTML = errorBox(err); }
+}
+
+// ------------------------------------------------------------------- tracker
 async function viewTracker(token) {
-  view.innerHTML = `<h1 class="page-title">Tracker</h1><div class="page-sub">Your tracked selections, settled automatically, with Closing Line Value.</div>${skeleton(2)}`;
+  view.innerHTML = backBtn() + head(t("tr_title")) + skeleton(2);
   try {
     const d = await api("/api/tracker");
     if (token !== state.routeToken) return;
-    view.innerHTML = renderTracker(d);
+    view.innerHTML = backBtn() + renderTracker(d);
   } catch (err) { view.innerHTML += errorBox(err); }
 }
 
 function renderTracker(d) {
   const s = d.summary;
-  const tile = (k, v, cls = "") => `<div class="tile"><div class="k">${k}</div><div class="v ${cls}">${v}</div></div>`;
+  const tile = (k, v, cls = "") => `<div class="tile static"><div class="k">${esc(t(k))}</div><div class="v ${cls}">${v}</div></div>`;
   const items = d.items.map((it) => {
-    const stCls = { won: "green", half_won: "green", lost: "red", half_lost: "orange", void: "", pending: "blue", partial: "amber" }[it.status] || "";
+    const cls = { won: "green", half_won: "green", lost: "red", half_lost: "orange", void: "", pending: "blue", partial: "amber" }[it.status] || "";
     const legs = it.legs.map((l) => `<div class="small" style="margin-top:4px"><b>${esc(l.selection_label)}</b> @ <span class="odds">${fmtOdds(l.odds)}</span> ${esc(l.bookmaker_name)}
-      <span class="muted">· ${esc(l.match)} · ${fmtTime(l.kickoff)}</span>
-      ${l.result ? chip(l.result.includes("win") ? "green" : l.result.includes("lose") ? "red" : "", l.result.replace("_", " ")) : ""}
-      ${l.clv_pct != null ? `<span class="${evClass(l.clv_pct)}"> · CLV ${fmtEv(l.clv_pct)}</span>` : ""}
-      ${l.ev_pct != null ? `<span class="muted"> · EV at pick ${fmtEv(l.ev_pct)}</span>` : ""}</div>`).join("");
-    return `<div class="card">
-      <div class="spread"><b>${esc(it.title)}</b>${chip(stCls, it.status.replace("_", " "))}</div>
-      <div class="small muted">${fmtTime(it.created_at)} · stake ${it.stake} · odds ${fmtOdds(it.combined_odds)}${it.profit != null ? ` · profit <span class="${evClass(it.profit)}">${it.profit > 0 ? "+" : ""}${it.profit}</span>` : ""} ${it.is_demo ? chip("violet", "Demo") : ""}</div>
-      ${legs}
-      <div class="row wrap" style="margin-top:10px">
-        ${it.status === "pending" ? `<button class="btn ghost small" data-action="settle" data-id="${esc(it.id)}" data-v="won">Mark won</button>
-        <button class="btn ghost small" data-action="settle" data-id="${esc(it.id)}" data-v="lost">Mark lost</button>
-        <button class="btn ghost small" data-action="settle" data-id="${esc(it.id)}" data-v="void">Void</button>` : it.manual_result ? `<button class="btn ghost small" data-action="settle" data-id="${esc(it.id)}" data-v="pending">Reopen</button>` : ""}
-        <button class="btn danger small" data-action="delTracked" data-id="${esc(it.id)}">Delete</button>
-      </div></div>`;
+      <span class="muted">· ${esc(l.match)} · ${fmtTime(l.kickoff)}</span> ${l.result ? chip(l.result.includes("win") ? "green" : l.result.includes("lose") ? "red" : "", l.result.replace("_", " ")) : ""}
+      ${l.clv_pct != null ? `<span class="${evClass(l.clv_pct)}"> · ${esc(t("tr_clv"))} ${fmtEv(l.clv_pct)}</span>` : ""}${l.ev_pct != null ? `<span class="muted"> · ${esc(t("tr_ev_pick"))} ${fmtEv(l.ev_pct)}</span>` : ""}</div>`).join("");
+    return `<div class="card"><div class="spread"><b>${esc(it.title)}</b>${chip(cls, t(`st_${it.status}`))}</div>
+      <div class="small muted">${fmtTime(it.created_at)} · ${esc(t("tr_meta", { s: it.stake, o: fmtOdds(it.combined_odds) }))}${it.profit != null ? ` · ${esc(t("tr_profit_l"))} <span class="${evClass(it.profit)}">${it.profit > 0 ? "+" : ""}${it.profit}</span>` : ""} ${it.is_demo ? chip("violet", t("demo")) : ""}</div>
+      ${legs}<div class="row wrap" style="margin-top:10px">
+        ${it.status === "pending" ? ["won", "lost", "void"].map((v) => `<button class="btn ghost small" data-action="settle" data-id="${esc(it.id)}" data-v="${v}">${esc(t(v === "won" ? "tr_won" : v === "lost" ? "tr_lost" : "tr_void"))}</button>`).join("")
+          : it.manual_result ? `<button class="btn ghost small" data-action="settle" data-id="${esc(it.id)}" data-v="pending">${esc(t("tr_reopen"))}</button>` : ""}
+        <button class="btn danger small" data-action="delTracked" data-id="${esc(it.id)}">${esc(t("tr_delete"))}</button></div></div>`;
   }).join("");
-  return `<h1 class="page-title">Tracker</h1>
-    <div class="page-sub">Selections you track are settled automatically from results. CLV compares your odds with the margin-free closing price, which is the best long-run test of whether the value detection works. Demo items are excluded from the totals.</div>
-    <div class="tiles">
-      ${tile("Tracked", s.tracked)}${tile("Settled", s.settled)}
-      ${tile("Hit rate", s.hit_rate_pct != null ? s.hit_rate_pct + "%" : "–")}${tile("ROI", s.roi_pct != null ? fmtEv(s.roi_pct) : "–", evClass(s.roi_pct))}
-      ${tile("Avg EV at pick", fmtEv(s.avg_ev_pct), evClass(s.avg_ev_pct))}${tile("Avg CLV", fmtEv(s.avg_clv_pct), evClass(s.avg_clv_pct))}
-      ${tile("Beat closing line", s.clv_beat_rate_pct != null ? s.clv_beat_rate_pct + "%" : "–")}${tile("Profit (units)", s.profit, evClass(s.profit))}
-    </div>
-    <div class="section-title">History</div>
-    ${items || `<div class="empty"><div class="big">Nothing tracked yet</div>Use "Track coupon" in Daily Picks or "Track this selection" in a match analysis.</div>`}`;
+  return head(t("tr_title"), esc(t("tr_sub"))) + `<div class="tiles">
+    ${tile("tr_tracked", s.tracked)}${tile("tr_settled", s.settled)}${tile("tr_hit", s.hit_rate_pct != null ? s.hit_rate_pct + "%" : "–")}${tile("tr_roi", s.roi_pct != null ? fmtEv(s.roi_pct) : "–", evClass(s.roi_pct))}
+    ${tile("tr_avg_ev", fmtEv(s.avg_ev_pct), evClass(s.avg_ev_pct))}${tile("tr_avg_clv", fmtEv(s.avg_clv_pct), evClass(s.avg_clv_pct))}
+    ${tile("tr_beat", s.clv_beat_rate_pct != null ? s.clv_beat_rate_pct + "%" : "–")}${tile("tr_profit", s.profit, evClass(s.profit))}</div>
+    <div class="section-title">${esc(t("tr_history"))}</div>${items || `<div class="empty"><div class="big">${esc(t("tr_empty"))}</div>${esc(t("tr_empty_sub"))}</div>`}`;
 }
 
-// --------------------------------------------------------------- sources
-const SETTING_FIELDS = [
-  ["min_ev_pct", "Minimum EV per selection (%)", 0.5],
-  ["min_market_edge_pct", "Price vs margin-free market price (%)", 0.5, "0 means the price must at least match the fair market price, so the agents can't create value on their own. -100 disables this."],
-  ["min_confidence", "Minimum confidence (0-100)", 1],
-  ["min_leg_probability", "Minimum probability per coupon leg (0-1)", 0.01],
-  ["max_leg_odds", "Maximum odds per coupon leg", 0.1],
-  ["coupon_min_odds", "Coupon combined odds must be above", 0.1],
-  ["coupon_max_legs", "Maximum legs per coupon (1-3)", 1],
-  ["suspicious_ev_pct", "Flag as possible pricing error above EV (%)", 1],
-  ["stale_minutes", "Treat prices as stale after (minutes)", 10],
-  ["model_weight", "Statistical model weight (0-0.6)", 0.05, "How strongly the independent model can move the market probability."],
-  ["max_logit_shift", "Maximum adjustment by agents (logit units)", 0.05],
-  ["bankroll", "Bankroll (for stake suggestions)", 10],
-  ["kelly_fraction", "Kelly fraction (0.25 = quarter Kelly)", 0.05],
-  ["lookahead_hours", "Scanner window (hours ahead)", 6],
-  ["day_end_hour", "Daily Picks day ends at (hour, local)", 1],
-  ["auto_refresh_minutes", "Auto refresh every (minutes, 0 = off)", 5],
-  ["retention_days", "Keep finished matches for (days)", 1],
-];
+// --------------------------------------------------------------------- usage
+async function viewUsage(token) {
+  view.innerHTML = backBtn() + head(t("u_title"), esc(t("u_sub"))) + skeleton(3);
+  try {
+    const [u, plan, st] = await Promise.all([api("/api/usage"), api("/api/credits-plan"), api("/api/status")]);
+    if (token !== state.routeToken) return;
+    view.innerHTML = backBtn() + renderUsage(u, plan, st);
+  } catch (err) { view.innerHTML += errorBox(err); }
+}
+
+function tokenBar(tk, method) {
+  if (!tk) return `<span class="small muted">${esc(t(method === "scraping" ? "u_no_tokens" : "u_no_data"))}</span>`;
+  if (tk.remaining_by_sport) return Object.entries(tk.remaining_by_sport).map(([s, r]) => `<div class="small">${esc(t("u_by_sport", { s: sportLabel(s), r }))}</div>`).join("") + `<div class="tiny faint">${esc(t("u_exact"))}</div>`;
+  if (tk.limit == null) return `<span class="small muted">–</span>`;
+  const used = tk.used || 0, limit = tk.limit, remaining = tk.remaining ?? Math.max(0, limit - used);
+  const pct = limit ? Math.min(100, Math.round((used / limit) * 100)) : 0;
+  return `<div class="usage-bar ${pct > 85 ? "hot" : pct > 60 ? "warm" : ""}"><i style="width:${pct}%"></i></div>
+    <div class="small">${esc(t("u_left", { r: Math.round(remaining), l: Math.round(limit), u: tk.unit, p: t(`period_${tk.period}`) }))}</div>
+    <div class="tiny faint">${esc(tk.exact ? t("u_exact") : t("u_estimate"))}</div>`;
+}
+
+function renderUsage(u, plan, st) {
+  const methods = u.last_refresh.odds_methods || [];
+  const now = st.demo_mode ? t("u_m_demo") : methods.includes("api") ? t("u_m_api") : methods.includes("scraping") ? t("u_m_scraping") : t("u_m_manual");
+  const nowCls = methods.includes("scraping") && !methods.includes("api") ? "orange" : methods.includes("api") ? "green" : "amber";
+  const mchip = (m) => chip(m === "scraping" ? "orange" : "blue", m === "scraping" ? t("u_m_scraping") : t("u_m_api"));
+  const chain = (u.last_refresh.chain || []).map((c) => `<div class="list-row"><span><b>${esc(c.provider)}</b> ${mchip(c.method)}</span>
+      <span class="small">${c.ran ? chip("green", t("u_ran")) : chip("", t("u_skipped"))} <span class="muted">${esc(t(`r_${c.reason}`))}${c.ran && c.quotes != null ? ` · ${c.quotes}` : ""}</span></span></div>`).join("");
+  const rows = u.providers.map((p) => `<div class="card"><div class="spread"><b>${esc(p.label)}</b><span class="row">${mchip(p.method)}
+      ${p.configured ? (p.exhausted ? chip("red", t("r_exhausted")) : chip("green", t("s_connected"))) : chip("", t("s_not_conf"))}</span></div>
+    <div style="margin-top:8px">${tokenBar(p.tokens, p.method)}</div>
+    <dl class="kv" style="margin-top:8px"><dt>${esc(t("u_today"))}</dt><dd>${p.requests_today}</dd><dt>${esc(t("u_month"))}</dt><dd>${p.requests_month}</dd>
+      <dt>${esc(t("u_last"))}</dt><dd>${agoIso(p.last_request_at)}</dd>${p.last_error ? `<dt>${esc(t("s_last_error"))}</dt><dd class="err-text">${esc(p.last_error)}</dd>` : ""}</dl>
+    ${Object.keys(p.blocked_hosts || {}).length ? `<div class="small" style="margin-top:6px;color:var(--orange)">${esc(t("u_blocked"))}: ${Object.entries(p.blocked_hosts).map(([h, b]) => `${esc(h)} (${esc(b.reason || "")})`).join(", ")}</div>` : ""}</div>`).join("");
+  const price = plan.price_usd ? t("per_month", { p: plan.price_usd }) : t("free");
+  return head(t("u_title"), esc(t("u_sub"))) + `<div class="card spread"><span>${esc(t("u_method_now"))}</span>${chip(nowCls, now)}</div>
+    <div class="section-title">${esc(t("u_chain"))}</div><div class="card">${chain || `<span class="small muted">${esc(t("never"))}</span>`}</div>
+    <div class="section-title">${esc(t("s_providers"))}</div>${rows}
+    <div class="section-title">${esc(t("u_planner"))}</div><div class="card small">${t("u_plan_line", { c: plan.credits_per_refresh, r: plan.refreshes_per_day, m: plan.monthly_credits })}
+      <div style="margin-top:6px">${t("u_plan_rec", { p: esc(plan.recommended_plan), price: esc(price) })}</div><div class="tiny faint" style="margin-top:4px">${esc(plan.assumption)}</div></div>`;
+}
+
+// ------------------------------------------------------------------- sources
+const NUM_SETTINGS = [["min_ev_pct", 0.5], ["min_market_edge_pct", 0.5], ["min_confidence", 1], ["min_leg_probability", 0.01], ["max_leg_odds", 0.1],
+  ["coupon_min_odds", 0.1], ["coupon_max_legs", 1], ["max_coupons", 1], ["deviation_warning_pct", 0.5], ["deviation_alert_pct", 0.5], ["suspicious_ev_pct", 1],
+  ["stale_minutes", 10], ["model_weight", 0.05], ["max_logit_shift", 0.05], ["bankroll", 10], ["kelly_fraction", 0.05], ["lookahead_hours", 6],
+  ["day_end_hour", 1], ["auto_refresh_minutes", 5], ["active_hours_start", 1], ["active_hours_end", 1], ["retention_days", 1]];
 
 async function viewSources(token) {
-  view.innerHTML = `<h1 class="page-title">Sources &amp; settings</h1>${skeleton(3)}`;
+  view.innerHTML = backBtn() + head(t("s_title")) + skeleton(3);
   try {
     const [status, settings, books, comps] = await Promise.all([api("/api/status"), api("/api/settings"), api("/api/bookmakers"), api("/api/competitions")]);
     if (token !== state.routeToken) return;
-    state.status = status; renderTop();
-    state.bookmakers = books;
-    view.innerHTML = renderSources(status, settings, books, comps);
+    state.status = status; renderTop(); state.bookmakers = books;
+    view.innerHTML = backBtn() + renderSources(status, settings, books, comps);
   } catch (err) { view.innerHTML += errorBox(err); }
 }
 
 function providerCard(p, settings) {
-  const keyName = p.name === "the_odds_api" ? "odds_api_key" : "api_sports_key";
-  const sk = settings[keyName];
-  let stateChip = chip("amber", "Not configured");
-  if (p.configured && p.last_error && (!p.last_ok || p.last_error_at > p.last_ok)) stateChip = chip("red", "Error");
-  else if (p.configured && p.last_ok) stateChip = chip("green", "Connected");
-  else if (p.configured) stateChip = chip("blue", "Key saved, refresh to connect");
-  const remaining = p.remaining == null ? "–" : typeof p.remaining === "object" ? Object.entries(p.remaining).map(([k, v]) => `${k} ${v}`).join(", ") : p.remaining;
-  const about = p.name === "the_odds_api"
-    ? `Live pre-match odds from NordicBet, Betsson, Unibet, Pinnacle, Betfair, William Hill and more. Free plan: 500 credits/month. <a href="https://the-odds-api.com" target="_blank" rel="noopener">the-odds-api.com</a>`
-    : `Fixtures, odds, team statistics, recent form, head-to-head, injuries/suspensions and lineups for football, basketball and handball (incl. EHF competitions). The free plan usually covers past seasons only, so a paid plan is needed for current matches. <a href="https://api-sports.io" target="_blank" rel="noopener">api-sports.io</a>`;
-  return `<div class="card">
-    <div class="spread"><b>${esc(p.label)}</b>${stateChip}</div>
-    <div class="small muted" style="margin-top:4px">${about}</div>
-    <dl class="kv" style="margin-top:10px">
-      <dt>Last success</dt><dd>${agoIso(p.last_ok)}</dd>
-      <dt>Requests today</dt><dd>${p.requests_today}</dd>
-      <dt>Quota remaining</dt><dd>${esc(remaining)}</dd>
-      ${p.last_error ? `<dt>Last error</dt><dd style="color:var(--red);white-space:normal">${esc(p.last_error)}</dd>` : ""}
-    </dl>
-    ${sk.source === "environment" ? `<div class="small muted" style="margin-top:10px">API key set via environment variable (${sk.hint}).</div>` : `
-    <form data-submit="saveKey" data-key="${keyName}" class="row" style="margin-top:10px">
-      <input class="input" type="password" name="key" autocomplete="off" placeholder="${sk.configured ? "Key saved " + esc(sk.hint) + " · paste to replace" : "Paste API key"}">
-      <button class="btn small" type="submit">Save</button>
-      ${sk.configured ? `<button class="btn danger small" type="button" data-action="clearKey" data-key="${keyName}">Remove</button>` : ""}
-    </form>`}
-  </div>`;
+  const keyName = { the_odds_api: "odds_api_key", api_sports: "api_sports_key", odds_api_io: "odds_api_io_key", oddspapi: "oddspapi_key" }[p.provider];
+  let stc = chip("amber", t("s_not_conf"));
+  if (p.configured && p.last_error && (!p.last_ok || p.last_error_at > p.last_ok)) stc = chip("red", t("s_error"));
+  else if (p.configured && p.last_ok) stc = chip("green", t("s_connected"));
+  else if (p.configured) stc = chip("blue", t("s_key_saved"));
+  let keyBox = "";
+  if (keyName) {
+    const sk = settings[keyName];
+    keyBox = sk.source === "environment" ? `<div class="small muted" style="margin-top:10px">${esc(t("s_env", { h: sk.hint }))}</div>` : `
+      <form data-submit="saveKey" data-key="${keyName}" class="row" style="margin-top:10px"><input class="input" type="password" name="key" autocomplete="off" placeholder="${esc(sk.configured ? t("s_saved_hint", { h: sk.hint }) : t("s_paste"))}">
+      <button class="btn small" type="submit">${esc(t("save"))}</button>${sk.configured ? `<button class="btn danger small" type="button" data-action="clearKey" data-key="${keyName}">${esc(t("remove"))}</button>` : ""}</form>`;
+  }
+  let extra = "";
+  if (p.provider === "odds_api_io") extra = listSetting("odds_api_io_bookmakers", settings.odds_api_io_bookmakers, t("s_bookmakers_list"));
+  if (p.provider === "oddspapi") extra = listSetting("oddspapi_bookmakers", settings.oddspapi_bookmakers, t("s_bookmakers_list"));
+  if (p.provider === "scraper") {
+    stc = chip(settings.scraper_mode === "off" ? "" : "orange", t(`sm_${settings.scraper_mode}`).split(" (")[0]);
+    extra = `<form data-submit="saveScraper" style="margin-top:10px"><div class="field"><label class="f">${esc(t("s_scraper_mode"))}</label><select class="input" name="scraper_mode">${["off", "fallback", "always"].map((m) => `<option value="${m}" ${settings.scraper_mode === m ? "selected" : ""}>${esc(t(`sm_${m}`))}</option>`).join("")}</select></div>
+      <div class="grid-2"><div class="field"><label class="f">${esc(t("s_kambi_ops"))}</label><input class="input" name="scraper_kambi_operators" value="${esc(settings.scraper_kambi_operators.join(", "))}"></div>
+      <div class="field" style="margin-top:12px"><label class="f">${esc(t("s_kambi_market"))}</label><input class="input" name="scraper_kambi_market" value="${esc(settings.scraper_kambi_market)}"></div></div>
+      <button class="btn ghost small" type="submit" style="margin-top:8px">${esc(t("save"))}</button></form>`;
+  }
+  return `<div class="card"><div class="spread"><b>${esc(p.label)}</b>${stc}</div><div class="small muted" style="margin-top:4px">${t(`p_${p.provider}`)}</div>
+    <dl class="kv" style="margin-top:10px"><dt>${esc(t("s_last_ok"))}</dt><dd>${agoIso(p.last_ok)}</dd><dt>${esc(t("s_requests"))}</dt><dd>${p.requests_today}</dd>
+      ${p.last_error ? `<dt>${esc(t("s_last_error"))}</dt><dd class="err-text">${esc(p.last_error)}</dd>` : ""}</dl>${keyBox}${extra}</div>`;
+}
+
+function listSetting(key, values, label) {
+  return `<form data-submit="saveList" data-key="${key}" class="field"><label class="f">${esc(label)}</label><div class="row"><input class="input" name="v" value="${esc((values || []).join(", "))}"><button class="btn ghost small" type="submit">${esc(t("save"))}</button></div></form>`;
 }
 
 function renderSources(status, settings, books, comps) {
-  const STATE = {
-    connected: ["green", "Automated"], configured_no_data: ["blue", "Feed configured, no prices yet"],
-    provider_not_configured: ["amber", "Needs API key"], manual_only: ["", "Manual entry only"],
-  };
-  const bookRows = books.map((b) => `<div class="list-row">
-      <div style="min-width:0"><div><b>${esc(b.name)}</b> ${b.priority ? chip("blue", "priority") : ""} ${b.type !== "soft" ? chip("violet", b.type) : ""}</div>
-        <div class="tiny muted">${b.sources.length ? "Feeds: " + esc(b.sources.join(", ")) : "No feed"}${b.last_automated_quote ? " · last price " + agoIso(b.last_automated_quote) : ""}${b.manual_quotes ? ` · ${b.manual_quotes} manual price(s)` : ""}</div>
-        ${b.limitation ? `<div class="tiny" style="color:var(--amber);margin-top:2px">${esc(b.limitation)}</div>` : ""}</div>
-      <div style="text-align:right;flex-shrink:0">${chip(STATE[b.state][0], STATE[b.state][1])}
-        <label class="switch tiny" style="margin-top:6px"><span>Mine</span><input type="checkbox" data-change="myBook" value="${esc(b.key)}" ${b.mine ? "checked" : ""}></label></div>
-    </div>`).join("");
-  const bySport = { football: [], basketball: [], handball: [] };
-  for (const c of comps.items) bySport[c.sport].push(c);
-  const compBlocks = Object.entries(bySport).map(([sport, list]) => `<div class="card"><b>${SPORT_ICON[sport]} ${SPORT_LABEL[sport]}</b>
-    ${list.map((c) => `<div class="list-row"><div><div>${esc(c.name)} <span class="muted small">${esc(c.country)}</span></div>
-      <div class="tiny muted">${[c.odds_source ? "odds: The Odds API" : null, c.stats_source ? "fixtures/stats/odds: API-Sports" : null].filter(Boolean).join(" · ") || "manual only"}</div></div>
-      <label class="switch"><input type="checkbox" data-change="toggleComp" value="${esc(c.id)}" ${c.enabled ? "checked" : ""}></label></div>`).join("")}</div>`).join("");
-  const fields = SETTING_FIELDS.map(([k, label, step, help]) => `<div class="field"><label class="f" for="set_${k}">${esc(label)}</label>
-      <input class="input" id="set_${k}" name="${k}" type="number" step="${step}" value="${esc(settings[k])}">${help ? `<div class="tiny faint" style="margin-top:3px">${esc(help)}</div>` : ""}</div>`).join("");
-  const regions = ["eu", "uk", "se"].map((r) => `<label class="switch small"><input type="checkbox" name="odds_api_regions" value="${r}" ${settings.odds_api_regions.includes(r) ? "checked" : ""}><span>${r.toUpperCase()}</span></label>`).join(" ");
-  const mkts = ["h2h", "totals", "spreads"].map((m) => `<label class="switch small"><input type="checkbox" name="odds_api_markets" value="${m}" ${settings.odds_api_markets.includes(m) ? "checked" : ""}><span>${m}</span></label>`).join(" ");
-  return `<h1 class="page-title">Sources &amp; settings</h1>
-  <div class="page-sub">BetFinder only shows prices it actually received. Bookmakers without an accessible feed are labelled "Manual entry only".</div>
-
-  <div class="section-title">Data providers</div>
-  ${status.providers.map((p) => providerCard(p, settings)).join("")}
-  <div class="card">
-    <div class="spread"><b>Manual entry</b>${chip("green", "Always available")}</div>
-    <div class="small muted" style="margin-top:4px">Enter prices from any bookmaker under <a href="#add">Add odds</a>. They are compared with every other price for the same match and market.</div>
-  </div>
-  <div class="card">
-    <div class="spread"><div><b>Demo mode</b><div class="small muted">Load fictional matches and bookmakers to explore the features. Never mixed into tracker statistics.</div></div>
-      <label class="switch"><input type="checkbox" data-change="demoMode" ${settings.demo_mode ? "checked" : ""}></label></div>
-  </div>
-
-  <div class="section-title">The Odds API options</div>
-  <form class="card" data-submit="saveOddsApi">
-    <div class="small muted">Each refresh costs (enabled competitions with a feed) × regions × markets credits. Currently about <b>${comps.odds_api_cost_per_refresh}</b> credits.</div>
-    <div class="row wrap" style="margin-top:10px"><span class="small" style="width:70px">Regions</span>${regions}</div>
-    <div class="row wrap" style="margin-top:8px"><span class="small" style="width:70px">Markets</span>${mkts}</div>
-    <button class="btn ghost small" type="submit" style="margin-top:10px">Save</button>
-  </form>
-
-  <div class="section-title">Bookmakers</div>
-  <div class="card">
-    <div class="small muted" style="margin-bottom:6px">Tick "Mine" for the bookmakers you can bet with. Daily Picks then only use their prices. Tick none to use all of them.</div>
-    ${bookRows}
-  </div>
-
-  <div class="section-title">Competitions</div>
-  ${compBlocks}
-  <div class="small muted" style="margin-top:8px">Excluded at your request: ${esc(comps.excluded_by_request.join(", "))}. To add a competition, add an entry to <code>data/registry/competitions.json</code>.</div>
-
-  <div class="section-title">Analysis &amp; Daily Picks settings</div>
+  const ST = { connected: ["green", "b_connected"], scraped: ["orange", "b_scraped"], configured_no_data: ["blue", "b_configured"], provider_not_configured: ["amber", "b_needs_key"], manual_only: ["", "b_manual"] };
+  const bookRows = books.map((b) => `<div class="list-row"><div style="min-width:0"><div><b>${esc(b.name)}</b> ${b.priority ? chip("blue", t("prio")) : ""} ${b.type !== "soft" ? chip("violet", b.type) : ""}</div>
+      <div class="tiny muted">${b.sources.length ? esc(t("s_feeds", { f: b.sources.join(", ") })) : esc(t("s_no_feed"))}${b.last_automated_quote ? " · " + esc(t("s_last_price", { t: agoIso(b.last_automated_quote) })) : ""}${b.manual_quotes ? " · " + esc(t("s_manual_prices", { n: b.manual_quotes })) : ""}</div>
+      ${b.limitation ? `<div class="tiny" style="color:var(--amber);margin-top:2px">${esc(b.limitation)}</div>` : ""}</div>
+      <div style="text-align:right;flex-shrink:0">${chip(ST[b.state][0], t(ST[b.state][1]))}<label class="switch tiny" style="margin-top:6px"><span>${esc(t("s_mine"))}</span><input type="checkbox" data-change="myBook" value="${esc(b.key)}" ${b.mine ? "checked" : ""}></label></div></div>`).join("");
+  const cats = state.catalog.categories;
+  const compBlocks = Object.entries(cats).sort((a, b) => a[1].order - b[1].order).map(([ck, cv]) => {
+    const sports = Object.keys(state.catalog.sports).filter((s) => state.catalog.sports[s].category === ck);
+    return `<div class="cat-title">${esc(cv[state.lang] || cv.en)}</div>` + sports.map((sp) => {
+      const list = comps.items.filter((c) => c.sport === sp);
+      if (!list.length) return "";
+      const on = list.filter((c) => c.enabled).length;
+      return `<details class="market"><summary><span>${sportIcon(sp)} ${esc(sportLabel(sp))}</span><span class="small muted">${on}/${list.length}</span></summary>${list.map((c) => `<div class="list-row"><div><div>${esc(c.name)} <span class="muted small">${esc(c.country)}</span></div>
+        <div class="tiny muted">${[c.odds_source ? t("s_odds_feed") : null, c.stats_source ? t("s_stats_feed") : null].filter(Boolean).join(" · ") || esc(t("s_manual_feed"))}</div></div>
+        <label class="switch"><input type="checkbox" data-change="toggleComp" value="${esc(c.id)}" ${c.enabled ? "checked" : ""}></label></div>`).join("")}</details>`;
+    }).join("");
+  }).join("");
+  const nums = NUM_SETTINGS.map(([k, step]) => `<div class="field"><label class="f" for="set_${k}">${esc(t(`set_${k}`))}</label><input class="input" id="set_${k}" name="${k}" type="number" step="${step}" value="${esc(settings[k])}">
+      ${t(`set_${k}_h`) !== `set_${k}_h` ? `<div class="tiny faint" style="margin-top:3px">${esc(t(`set_${k}_h`))}</div>` : ""}</div>`).join("");
+  const sw = (name, on) => `<label class="switch small"><input type="checkbox" name="${name}" ${on ? "checked" : ""}><span>${esc(t(`s_n_${name.replace("notify_on_", "")}`))}</span></label>`;
+  const tg = settings.notify_telegram_token;
+  const plan = comps.credit_plan;
+  return head(t("s_title"), esc(t("s_sub"))) + `
+  <div class="section-title">${esc(t("s_providers"))}</div>${status.providers.map((p) => providerCard(p, settings)).join("")}
+  <div class="card"><div class="spread"><b>${esc(t("s_manual"))}</b>${chip("green", t("s_always"))}</div><div class="small muted" style="margin-top:4px">${t("s_manual_d")}</div></div>
+  <div class="card"><div class="spread"><div><b>${esc(t("s_demo"))}</b><div class="small muted">${esc(t("s_demo_d"))}</div></div><label class="switch"><input type="checkbox" data-change="demoMode" ${settings.demo_mode ? "checked" : ""}></label></div></div>
+  <div class="section-title">${esc(t("s_odds_opts"))}</div>
+  <form class="card" data-submit="saveOddsApi"><div class="small muted">${t("s_cost", { c: plan.credits_per_refresh })} <a href="#usage">${esc(t("u_planner"))} ›</a></div>
+    <div class="row wrap" style="margin-top:10px"><span class="small" style="width:70px">${esc(t("s_regions"))}</span>${["eu", "uk", "se", "fr"].map((r) => `<label class="switch small"><input type="checkbox" name="odds_api_regions" value="${r}" ${settings.odds_api_regions.includes(r) ? "checked" : ""}><span>${r.toUpperCase()}</span></label>`).join(" ")}</div>
+    <div class="row wrap" style="margin-top:8px"><span class="small" style="width:70px">${esc(t("s_markets"))}</span>${["h2h", "totals", "spreads"].map((m) => `<label class="switch small"><input type="checkbox" name="odds_api_markets" value="${m}" ${settings.odds_api_markets.includes(m) ? "checked" : ""}><span>${m}</span></label>`).join(" ")}</div>
+    <button class="btn ghost small" type="submit" style="margin-top:10px">${esc(t("save"))}</button></form>
+  <div class="section-title">${esc(t("s_notify"))}</div>
+  <form class="card" data-submit="saveNotify"><div class="small muted">${esc(t("s_notify_d"))}</div>
+    <div class="grid-2" style="margin-top:8px"><div class="field"><label class="f">${esc(t("s_tg_token"))}</label><input class="input" type="password" name="notify_telegram_token" autocomplete="off" placeholder="${tg.configured ? esc(t("s_saved_hint", { h: tg.hint })) : ""}"></div>
+      <div class="field" style="margin-top:12px"><label class="f">${esc(t("s_tg_chat"))}</label><input class="input" name="notify_telegram_chat_id" value="${esc(settings.notify_telegram_chat_id)}"></div>
+      <div class="field" style="margin-top:0"><label class="f">${esc(t("s_ntfy_topic"))}</label><input class="input" name="notify_ntfy_topic" value="${esc(settings.notify_ntfy_topic)}"></div>
+      <div class="field" style="margin-top:0"><label class="f">${esc(t("s_ntfy_server"))}</label><input class="input" name="notify_ntfy_server" value="${esc(settings.notify_ntfy_server)}"></div></div>
+    <div class="row wrap" style="margin-top:10px">${sw("notify_on_errors", settings.notify_on_errors)}${sw("notify_on_value", settings.notify_on_value)}${sw("notify_on_picks", settings.notify_on_picks)}${sw("notify_on_arbitrage", settings.notify_on_arbitrage)}</div>
+    <div class="field"><label class="f">${esc(t("s_n_min_ev"))}</label><input class="input" name="notify_min_ev_pct" type="number" step="0.5" value="${esc(settings.notify_min_ev_pct)}"></div>
+    <div class="row" style="margin-top:10px"><button class="btn ghost small" type="submit">${esc(t("save"))}</button><button class="btn ghost small" type="button" data-action="notifyTest">${esc(t("s_n_test"))}</button></div></form>
+  <div class="section-title">${esc(t("s_books"))}</div><div class="card"><div class="small muted" style="margin-bottom:6px">${esc(t("s_books_d"))}</div>${bookRows}</div>
+  <div class="section-title">${esc(t("s_competitions"))}</div><div class="small muted" style="margin-bottom:8px">${esc(t("s_comp_d", { e: comps.items.filter((c) => c.enabled).length, t: comps.items.length }))}</div>${compBlocks}
+  <div class="section-title">${esc(t("s_analysis"))}</div>
   <form class="card" data-submit="saveSettings">
-    <div class="field"><label class="f" for="set_max_risk">Maximum risk for qualifying bets</label><select class="input" id="set_max_risk" name="max_risk">
-      ${["low", "medium", "high", "very_high"].map((r) => `<option value="${r}" ${settings.max_risk === r ? "selected" : ""}>${r.replace("_", " ")}</option>`).join("")}</select></div>
-    <div class="field"><label class="f" for="set_devig">Margin removal method</label><select class="input" id="set_devig" name="devig_method">
-      ${[["shin", "Shin (recommended)"], ["power", "Power"], ["multiplicative", "Proportional"], ["additive", "Additive"]].map(([v, l]) => `<option value="${v}" ${settings.devig_method === v ? "selected" : ""}>${l}</option>`).join("")}</select></div>
-    <div class="field"><label class="f" for="set_tz">Timezone</label><input class="input" id="set_tz" name="timezone" value="${esc(settings.timezone)}"></div>
-    ${fields}
-    <button class="btn block" type="submit" style="margin-top:14px">Save settings</button>
-  </form>
-  <div class="footer-note">BetFinder ${esc(status.version)} · data stored as JSON files in data/runtime<br>Gambling involves risk. Only stake what you can afford to lose.</div>`;
+    <div class="grid-2"><div class="field"><label class="f">${esc(t("s_lang"))}</label><select class="input" name="language"><option value="en" ${settings.language === "en" ? "selected" : ""}>English</option><option value="da" ${settings.language === "da" ? "selected" : ""}>Dansk</option></select></div>
+      <div class="field" style="margin-top:12px"><label class="f">${esc(t("s_currency"))}</label><select class="input" name="currency">${["DKK", "EUR", "SEK", "NOK", "GBP", "USD"].map((c) => `<option ${settings.currency === c ? "selected" : ""}>${c}</option>`).join("")}</select></div></div>
+    <div class="field"><label class="f">${esc(t("s_max_risk"))}</label><select class="input" name="max_risk">${["low", "medium", "high", "very_high"].map((r) => `<option value="${r}" ${settings.max_risk === r ? "selected" : ""}>${esc(t(`risk_${r}`))}</option>`).join("")}</select></div>
+    <div class="field"><label class="f">${esc(t("s_devig"))}</label><select class="input" name="devig_method">${[["shin", "Shin"], ["power", "Power"], ["multiplicative", "Proportional"], ["additive", "Additive"]].map(([v, l]) => `<option value="${v}" ${settings.devig_method === v ? "selected" : ""}>${l}</option>`).join("")}</select></div>
+    <div class="field"><label class="f">${esc(t("s_tz"))}</label><input class="input" name="timezone" value="${esc(settings.timezone)}"></div>
+    ${nums}<button class="btn block" type="submit" style="margin-top:14px">${esc(t("s_save"))}</button></form>
+  <div class="footer-note">${t("footer", { v: esc(status.version) })}</div>`;
 }
 
-// ---------------------------------------------------------------- actions
+// ------------------------------------------------------------------- actions
+async function setLanguage(lang) {
+  state.lang = lang; store.set("bf_lang", lang);
+  applyLanguage();
+  try { await api("/api/settings", { method: "PUT", body: { language: lang } }); } catch (_) { /* offline */ }
+  state.markets = {}; state.competitions = {};
+  await loadStatus(); route();
+}
+async function askStake() { const v = prompt(t("stake_prompt"), "1"); return v === null ? null : parseFloat(v) || 1; }
+
 const actions = {
   openMatch: (el) => { location.hash = `#match/${encodeURIComponent(el.dataset.id)}`; },
-  back: () => { if (history.length > 1) history.back(); else location.hash = "#scanner"; },
+  back: () => { if (history.length > 1) history.back(); else location.hash = "#home"; },
+  setLang: (el) => setLanguage(el.dataset.v),
+  scanCat: (el) => { state.scanner.category = el.dataset.v; state.scanner.sport = ""; route(); },
   scanSport: (el) => { state.scanner.sport = el.dataset.v; route(); },
   scanValue: () => { state.scanner.value_only = !state.scanner.value_only; route(); },
-  addSport: (el) => { Object.assign(state.add, { sport: el.dataset.v, fixture: null, result: null, market: "h2h", line: "" }); route(); },
   addPick: (el) => { state.add.fixture = state.add._search[Number(el.dataset.i)]; state.add.result = null; route(); },
   addClearFixture: () => { state.add.fixture = null; state.add.result = null; route(); },
   addToggleCreate: () => { state.add.create = !state.add.create; state.add.fixture = null; route(); },
+  addRow: () => { state.add.rows = Math.min(8, state.add.rows + 1); route(); },
+  addRemoveRow: () => { state.add.rows = Math.max(1, state.add.rows - 1); route(); },
+  addBuilder: (el) => { builder.add({ fixture_id: el.dataset.fid, market_id: el.dataset.mid, selection: el.dataset.sel, label: el.dataset.label, match: el.dataset.match, odds: parseFloat(el.dataset.odds) }); toast(t("added_builder")); },
+  builderRemove: (el) => { builder.remove(Number(el.dataset.i)); route(); },
+  builderClear: () => { builder.clear(); route(); },
+  builderCalc: () => builderCalc(null),
+  fetchMore: async (el) => {
+    el.disabled = true;
+    try { const r = await api(`/api/fixtures/${encodeURIComponent(el.dataset.fid)}/fetch-more`, { method: "POST" }); toast(t("m_more_books_done", { n: r.quotes, b: r.budget_left }), 5000); route(); }
+    catch (err) { toast(err.message, 5000); el.disabled = false; }
+  },
   trackSel: async (el) => {
-    const stake = prompt("Stake to record (units):", "1");
-    if (stake === null) return;
-    try {
-      await api("/api/tracker/selection", { method: "POST", body: { fixture_id: el.dataset.fid, market_id: el.dataset.mid, selection: el.dataset.sel, stake: parseFloat(stake) || 1 } });
-      toast("Tracked: see the Tracker tab");
-    } catch (err) { toast(err.message, 5000); }
+    const stake = await askStake(); if (stake === null) return;
+    try { await api("/api/tracker/selection", { method: "POST", body: { fixture_id: el.dataset.fid, market_id: el.dataset.mid, selection: el.dataset.sel, stake } }); toast(t("tracked_ok")); }
+    catch (err) { toast(err.message, 5000); }
   },
   trackCoupon: async (el) => {
-    const stake = prompt("Stake to record (units):", "1");
-    if (stake === null) return;
-    try {
-      await api("/api/tracker/coupon", { method: "POST", body: { coupon_id: el.dataset.id, stake: parseFloat(stake) || 1 } });
-      toast("Coupon tracked");
-    } catch (err) { toast(err.message, 5000); }
+    const stake = await askStake(); if (stake === null) return;
+    try { await api("/api/tracker/coupon", { method: "POST", body: { coupon_id: el.dataset.id, stake } }); toast(t("tracked_ok")); } catch (err) { toast(err.message, 5000); }
   },
-  settle: async (el) => {
-    try { await api(`/api/tracker/${el.dataset.id}/settle`, { method: "POST", body: { status: el.dataset.v } }); route(); } catch (err) { toast(err.message); }
-  },
-  delTracked: async (el) => {
-    if (!confirm("Delete this tracked item?")) return;
-    try { await api(`/api/tracker/${el.dataset.id}`, { method: "DELETE" }); route(); } catch (err) { toast(err.message); }
-  },
-  delAbsence: async (el) => {
-    try { await api(`/api/fixtures/${encodeURIComponent(el.dataset.fid)}/absences/${el.dataset.aid}`, { method: "DELETE" }); route(); } catch (err) { toast(err.message); }
-  },
+  settle: async (el) => { try { await api(`/api/tracker/${el.dataset.id}/settle`, { method: "POST", body: { status: el.dataset.v } }); route(); } catch (err) { toast(err.message); } },
+  delTracked: async (el) => { if (!confirm(t("tr_confirm_delete"))) return; try { await api(`/api/tracker/${el.dataset.id}`, { method: "DELETE" }); route(); } catch (err) { toast(err.message); } },
+  delAbsence: async (el) => { try { await api(`/api/fixtures/${encodeURIComponent(el.dataset.fid)}/absences/${el.dataset.aid}`, { method: "DELETE" }); route(); } catch (err) { toast(err.message); } },
   saveLineups: async (el) => {
-    const fid = el.dataset.fid;
     try {
       for (const side of ["home", "away"]) {
-        const status = $(`[data-lineup="${side}"][data-field="status"]`).value;
-        const rot = $(`[data-lineup="${side}"][data-field="rotated"]`).value;
-        await api(`/api/fixtures/${encodeURIComponent(fid)}/lineups/${side}`, { method: "PUT", body: { status, rotated: rot === "" ? null : rot === "true" } });
+        const status = $(`[data-lineup="${side}"][data-field="status"]`).value, rot = $(`[data-lineup="${side}"][data-field="rotated"]`).value;
+        await api(`/api/fixtures/${encodeURIComponent(el.dataset.fid)}/lineups/${side}`, { method: "PUT", body: { status, rotated: rot === "" ? null : rot === "true" } });
       }
-      toast("Lineup info saved");
-      route();
+      toast(t("s_saved")); route();
     } catch (err) { toast(err.message); }
   },
-  clearKey: async (el) => {
-    if (!confirm("Remove this API key?")) return;
-    try { await api("/api/settings", { method: "PUT", body: { [el.dataset.key]: "" } }); toast("Key removed"); await loadStatus(); route(); } catch (err) { toast(err.message); }
-  },
+  clearKey: async (el) => { if (!confirm(t("s_remove_key"))) return; try { await api("/api/settings", { method: "PUT", body: { [el.dataset.key]: "" } }); toast(t("s_key_removed")); await loadStatus(); route(); } catch (err) { toast(err.message); } },
+  notifyTest: async () => { try { const r = await api("/api/notify/test", { method: "POST" }); toast(r.results.join(" · "), 5000); } catch (err) { toast(err.message, 5000); } },
 };
 
 const changes = {
   scanSort: (el) => { state.scanner.sort = el.value; route(); },
-  addBook: (el) => { state.add.bookmaker = el.value; },
+  scanDev: (el) => { state.scanner.min_deviation = el.value; route(); },
+  arbStake: (el) => { store.set("bf_arb_stake", parseFloat(el.value) || 100); route(); },
+  addSport: (el) => { Object.assign(state.add, { sport: el.value, fixture: null, result: null, market: "h2h", line: "" }); route(); },
   addMarket: (el) => { state.add.market = el.value; state.add.line = ""; route(); },
   myBook: async () => {
     const mine = $$('[data-change="myBook"]').filter((i) => i.checked).map((i) => i.value);
-    try { await api("/api/settings", { method: "PUT", body: { my_bookmakers: mine } }); toast(mine.length ? `Using ${mine.length} bookmaker(s) for picks` : "Using all bookmakers"); } catch (err) { toast(err.message); }
+    try { await api("/api/settings", { method: "PUT", body: { my_bookmakers: mine } }); toast(t("s_saved")); } catch (err) { toast(err.message); }
   },
   toggleComp: async (el) => {
-    try { await api(`/api/competitions/${encodeURIComponent(el.value)}`, { method: "PUT", body: { enabled: el.checked } }); state.competitions = {}; toast(el.checked ? "Competition enabled" : "Competition disabled"); }
+    try { await api(`/api/competitions/${encodeURIComponent(el.value)}`, { method: "PUT", body: { enabled: el.checked } }); state.competitions = {}; toast(t(el.checked ? "s_comp_on" : "s_comp_off")); }
     catch (err) { toast(err.message); el.checked = !el.checked; }
   },
   demoMode: async (el) => {
-    try {
-      await api("/api/settings", { method: "PUT", body: { demo_mode: el.checked } });
-      toast(el.checked ? "Demo data loaded" : "Demo data removed");
-      state.add.fixture = null; state.add.result = null;
-      await loadStatus();
-      route();
-    } catch (err) { toast(err.message); el.checked = !el.checked; }
+    try { await api("/api/settings", { method: "PUT", body: { demo_mode: el.checked } }); toast(t(el.checked ? "s_demo_on" : "s_demo_off")); state.add.fixture = null; state.add.result = null; await loadStatus(); route(); }
+    catch (err) { toast(err.message); el.checked = !el.checked; }
   },
 };
 
 const inputs = {
   addSearch: onAddSearch,
-  addPrice: updateMarginPreview,
+  addPrice: updateMargins,
+  addPaste: onPaste,
   addLine: (el) => {
     state.add.line = el.value;
     const fx = state.add.fixture;
-    for (const i of $$("[data-price]")) {
-      const lbl = i.closest(".field").querySelector("label");
-      lbl.textContent = selLabel(state.add.market, i.dataset.price, fx ? fx.home : state.add.home || "Home", fx ? fx.away : state.add.away || "Away", el.value || "?");
-    }
+    for (const lbl of $$("[data-sel-label]")) lbl.textContent = selLabel(state.add.market, lbl.dataset.selLabel, fx ? fx.home : state.add.home || "1", fx ? fx.away : state.add.away || "2", el.value || "?");
   },
 };
+
+const putSettings = async (body, msg) => { try { await api("/api/settings", { method: "PUT", body }); toast(msg || t("s_saved")); route(); } catch (err) { toast(err.message, 5000); } };
+const splitList = (v) => String(v || "").split(",").map((x) => x.trim()).filter(Boolean);
 
 const submits = {
   addOdds: submitAddOdds,
   addAbsence: async (form) => {
-    const body = Object.fromEntries(new FormData(form));
-    try { await api(`/api/fixtures/${encodeURIComponent(form.dataset.fid)}/absences`, { method: "POST", body }); toast("Absence added: analysis updated"); route(); }
-    catch (err) { toast(err.message); }
+    try { await api(`/api/fixtures/${encodeURIComponent(form.dataset.fid)}/absences`, { method: "POST", body: Object.fromEntries(new FormData(form)) }); toast(t("s_saved")); route(); } catch (err) { toast(err.message); }
+  },
+  saveXg: async (form) => {
+    const fd = new FormData(form);
+    try {
+      for (const side of ["home", "away"]) {
+        const f = fd.get(`${side}_for`), a = fd.get(`${side}_against`);
+        await api(`/api/fixtures/${encodeURIComponent(form.dataset.fid)}/xg/${side}`, { method: "PUT", body: { xg_for: f === "" ? null : Number(f), xg_against: a === "" ? null : Number(a) } });
+      }
+      toast(t("s_saved")); route();
+    } catch (err) { toast(err.message); }
   },
   setResult: async (form) => {
     const fd = new FormData(form);
-    try {
-      await api(`/api/fixtures/${encodeURIComponent(form.dataset.fid)}/result`, { method: "POST", body: { score_home: Number(fd.get("score_home")), score_away: Number(fd.get("score_away")) } });
-      toast("Result saved, tracked bets settled"); route();
-    } catch (err) { toast(err.message); }
+    try { await api(`/api/fixtures/${encodeURIComponent(form.dataset.fid)}/result`, { method: "POST", body: { score_home: Number(fd.get("score_home")), score_away: Number(fd.get("score_away")) } }); toast(t("s_saved")); route(); } catch (err) { toast(err.message); }
   },
   saveKey: async (form) => {
     const key = new FormData(form).get("key").trim();
-    if (!key) return toast("Paste a key first");
-    try { await api("/api/settings", { method: "PUT", body: { [form.dataset.key]: key } }); toast("Key saved. Press refresh to fetch data."); await loadStatus(); route(); }
-    catch (err) { toast(err.message); }
+    if (!key) return toast(t("s_paste"));
+    try { await api("/api/settings", { method: "PUT", body: { [form.dataset.key]: key } }); toast(t("s_key_saved_toast")); await loadStatus(); route(); } catch (err) { toast(err.message); }
   },
-  saveOddsApi: async (form) => {
-    const fd = new FormData(form);
-    try { await api("/api/settings", { method: "PUT", body: { odds_api_regions: fd.getAll("odds_api_regions"), odds_api_markets: fd.getAll("odds_api_markets") } }); toast("Saved"); route(); }
-    catch (err) { toast(err.message, 5000); }
+  saveList: (form) => putSettings({ [form.dataset.key]: splitList(new FormData(form).get("v")) }),
+  saveScraper: (form) => { const fd = new FormData(form); return putSettings({ scraper_mode: fd.get("scraper_mode"), scraper_kambi_operators: splitList(fd.get("scraper_kambi_operators")), scraper_kambi_market: fd.get("scraper_kambi_market").trim().toUpperCase() }); },
+  saveOddsApi: (form) => { const fd = new FormData(form); return putSettings({ odds_api_regions: fd.getAll("odds_api_regions"), odds_api_markets: fd.getAll("odds_api_markets") }); },
+  saveNotify: (form) => {
+    const fd = new FormData(form), body = {};
+    for (const k of ["notify_telegram_chat_id", "notify_ntfy_topic", "notify_ntfy_server"]) body[k] = fd.get(k).trim();
+    if (fd.get("notify_telegram_token").trim()) body.notify_telegram_token = fd.get("notify_telegram_token").trim();
+    for (const k of ["notify_on_errors", "notify_on_value", "notify_on_picks", "notify_on_arbitrage"]) body[k] = fd.get(k) === "on";
+    body.notify_min_ev_pct = Number(fd.get("notify_min_ev_pct"));
+    return putSettings(body, t("s_n_saved"));
   },
   saveSettings: async (form) => {
-    const fd = new FormData(form);
-    const body = {};
-    for (const [k, v] of fd.entries()) body[k] = ["max_risk", "devig_method", "timezone"].includes(k) ? v : Number(v);
-    try { await api("/api/settings", { method: "PUT", body }); toast("Settings saved"); route(); } catch (err) { toast(err.message, 5000); }
+    const fd = new FormData(form), body = {};
+    for (const [k, v] of fd.entries()) body[k] = ["max_risk", "devig_method", "timezone", "language", "currency"].includes(k) ? v : Number(v);
+    if (body.language && body.language !== state.lang) { state.lang = body.language; store.set("bf_lang", state.lang); applyLanguage(); }
+    await putSettings(body);
   },
 };
 
-document.addEventListener("click", (e) => {
-  const el = e.target.closest("[data-action]");
-  if (!el) return;
-  const fn = actions[el.dataset.action];
-  if (fn) { e.preventDefault(); fn(el, e); }
-});
-document.addEventListener("change", (e) => {
-  const el = e.target.closest("[data-change]");
-  if (el && changes[el.dataset.change]) changes[el.dataset.change](el, e);
-});
-document.addEventListener("input", (e) => {
-  const el = e.target.closest("[data-input]");
-  if (el && inputs[el.dataset.input]) inputs[el.dataset.input](el, e);
-});
-document.addEventListener("submit", (e) => {
-  const form = e.target.closest("[data-submit]");
-  if (form && submits[form.dataset.submit]) { e.preventDefault(); submits[form.dataset.submit](form, e); }
-});
+document.addEventListener("click", (e) => { const el = e.target.closest("[data-action]"); if (!el) return; const fn = actions[el.dataset.action]; if (fn) { e.preventDefault(); fn(el, e); } });
+document.addEventListener("change", (e) => { const el = e.target.closest("[data-change]"); if (el && changes[el.dataset.change]) changes[el.dataset.change](el, e); });
+document.addEventListener("input", (e) => { const el = e.target.closest("[data-input]"); if (el && inputs[el.dataset.input]) inputs[el.dataset.input](el, e); });
+document.addEventListener("submit", (e) => { const f = e.target.closest("[data-submit]"); if (f && submits[f.dataset.submit]) { e.preventDefault(); submits[f.dataset.submit](f, e); } });
 $("#refreshBtn").addEventListener("click", doRefresh);
-$("#sourcePill").addEventListener("click", () => { location.hash = "#sources"; });
+$("#sourcePill").addEventListener("click", () => { location.hash = "#usage"; });
+$("#langBtn").addEventListener("click", () => setLanguage(state.lang === "da" ? "en" : "da"));
 
-// ----------------------------------------------------------------- router
+// -------------------------------------------------------------------- router
+const MORE_TABS = ["more", "agents", "arbitrage", "builder", "tracker", "usage", "sources"];
 function route() {
-  const hash = location.hash.replace(/^#/, "") || "scanner";
+  const hash = location.hash.replace(/^#/, "") || "home";
   const [tab, ...rest] = hash.split("/");
   const token = ++state.routeToken;
-  $$(".tabbar a").forEach((a) => a.classList.toggle("on", a.dataset.tab === (tab === "match" ? "scanner" : tab)));
-  const views = { scanner: viewScanner, picks: viewPicks, add: viewAdd, tracker: viewTracker, sources: viewSources };
+  const nav = tab === "match" ? "scanner" : MORE_TABS.includes(tab) ? "more" : tab;
+  $$(".tabbar a").forEach((a) => a.classList.toggle("on", a.dataset.tab === nav));
+  const views = { home: viewHome, scanner: viewScanner, picks: viewPicks, add: viewAdd, more: viewMore, agents: viewAgents,
+    arbitrage: viewArbitrage, builder: viewBuilder, tracker: viewTracker, usage: viewUsage, sources: viewSources };
   if (tab === "match" && rest.length) viewMatch(token, decodeURIComponent(rest.join("/")));
-  else (views[tab] || viewScanner)(token);
+  else (views[tab] || viewHome)(token);
   if (!rest.length) window.scrollTo(0, 0);
 }
 window.addEventListener("hashchange", route);
-loadStatus().then(route);
+
+(async function init() {
+  applyLanguage();
+  try { state.catalog = await api("/api/catalog"); } catch (_) { state.catalog = { categories: {}, sports: {} }; }
+  await loadStatus();
+  if (state.status && state.status.language && store.get("bf_lang", null) === null) { state.lang = state.status.language; applyLanguage(); }
+  route();
+  if ("serviceWorker" in navigator) navigator.serviceWorker.register("/sw.js").catch(() => {});
+})();

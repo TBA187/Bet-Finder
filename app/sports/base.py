@@ -54,6 +54,19 @@ def shrink(avg: Optional[float], n: int, prior: float, k: float = 6.0) -> float:
     return (avg * n + prior * k) / (n + k)
 
 
+def xg_ok(stats: TeamStats) -> bool:
+    return stats.xg_for is not None and stats.xg_against is not None and stats.xg_games >= 3
+
+
+def xg_factor(goals_avg: Optional[float], xg_avg: Optional[float], xg_games: int) -> float:
+    """Multiplier that moves a goals-based rating toward the xG-based one."""
+    if not goals_avg or xg_avg is None or goals_avg <= 0:
+        return 1.0
+    w = 0.6 * min(1.0, xg_games / 6)
+    blended = (1 - w) * goals_avg + w * xg_avg
+    return max(0.5, min(1.8, blended / goals_avg))
+
+
 class SportModel(ABC):
     """Each sport implements its own scoring model.
 
@@ -93,6 +106,12 @@ class SportModel(ABC):
     @abstractmethod
     def describe(self, theta: dict) -> dict[str, Any]:
         """Human readable expected score etc."""
+
+    def expected_margin(self, theta: dict) -> float:  # pragma: no cover - overridden
+        return 0.0
+
+    def expected_total(self, theta: dict) -> float:  # pragma: no cover - overridden
+        return 0.0
 
     def probabilities_for(self, theta: dict, mid: str) -> Optional[dict[str, float]]:
         market, line = parse_market_id(mid)

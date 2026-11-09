@@ -1,0 +1,4 @@
+{$DOMAIN} {
+	encode gzip
+	reverse_proxy betfinder:8000
+}

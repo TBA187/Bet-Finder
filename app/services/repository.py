@@ -207,7 +207,7 @@ class Repository:
                 lineups[side] = LineupInfo.model_validate(raw.get("lineups", {}).get(side, {}))
             except ValidationError:
                 lineups[side] = LineupInfo()
-        return {"absences": absences, "lineups": lineups}
+        return {"absences": absences, "lineups": lineups, "xg": raw.get("xg", {})}
 
     def add_absence(self, fid: str, absence: Absence) -> Absence:
         absence.id = absence.id or uuid.uuid4().hex[:10]
@@ -228,6 +228,14 @@ class Repository:
             entry = data.setdefault(fid, {})
             entry.setdefault("lineups", {})[side] = info.model_dump(mode="json")
         return info
+
+    def set_xg(self, fid: str, side: str, xg_for: Optional[float], xg_against: Optional[float], games: int = 6) -> None:
+        with self.store.edit("team_news", {}) as data:
+            entry = data.setdefault(fid, {}).setdefault("xg", {})
+            if xg_for is None or xg_against is None:
+                entry.pop(side, None)
+            else:
+                entry[side] = {"for": float(xg_for), "against": float(xg_against), "games": int(games)}
 
     def provider_news(self, fid: str) -> dict:
         return self.store.read("provider_news", {}).get(fid, {})
@@ -274,8 +282,14 @@ class Repository:
             entry = data.setdefault(provider, {})
             counts = entry.setdefault("requests_by_day", {})
             counts[today] = counts.get(today, 0) + n
-            for day in sorted(counts)[:-7]:
+            for day in sorted(counts)[:-35]:
                 counts.pop(day, None)
+            month = today[:7]
+            months = entry.setdefault("requests_by_month", {})
+            months[month] = months.get(month, 0) + n
+            for m in sorted(months)[:-6]:
+                months.pop(m, None)
+            entry["last_request_at"] = utcnow().isoformat()
             return counts[today]
 
     # --------------------------------------------------------------- housekeeping
