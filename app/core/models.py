@@ -43,7 +43,6 @@ class Fixture(BaseModel):
     team_refs: dict[str, dict[str, str]] = Field(default_factory=dict)
     # provider -> {"league": id, "season": season}
     league_refs: dict[str, dict[str, str]] = Field(default_factory=dict)
-    is_demo: bool = False
     manual: bool = False
     created_at: datetime = Field(default_factory=utcnow)
     updated_at: datetime = Field(default_factory=utcnow)
@@ -75,7 +74,7 @@ class Quote(BaseModel):
     selection: str
     bookmaker: str
     odds: float
-    source: str  # the_odds_api | api_sports | manual | demo
+    source: str  # the_odds_api | api_sports | odds_api_io | oddspapi | scraper | manual
     fetched_at: datetime
     book_updated_at: Optional[datetime] = None
     # [[iso timestamp, odds], ...] oldest first; only changes are recorded

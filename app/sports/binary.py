@@ -9,7 +9,6 @@ from manually entered news such as an injury or short-notice replacement).
 """
 from __future__ import annotations
 
-import math
 from typing import Optional
 
 from app.core.models import TeamStats

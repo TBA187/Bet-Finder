@@ -3,7 +3,7 @@ from datetime import timedelta
 import pytest
 
 from app.agents.assessment import FormAgent
-from app.core.models import Absence, TeamStats
+from app.core.models import Absence
 from app.services.analysis import AGENT_ORDER
 from app.services.daily_picks import NO_PICKS_MESSAGE, build_daily_picks
 from tests.conftest import NOW, add_prices, make_fixture
@@ -97,7 +97,7 @@ def _fake_analysis(fid, kickoff, ev, prob, odds, conf=70, risk="low", qualifies=
            "final_prob": prob, "fair_odds": 1 / prob, "ev_pct": ev, "risk_rating": risk, "confidence": conf,
            "explanation": "x", "pricing_flags": [], "rejections": [] if qualifies else ["EV too low"], "qualifies": qualifies}
     return {"fixture": {"id": fid, "home": f"H{fid}", "away": f"A{fid}", "sport": "football", "kickoff": kickoff.isoformat(),
-                        "status": "scheduled", "is_demo": False},
+                        "status": "scheduled"},
             "competition": {"name": "Test"}, "selections": [sel]}
 
 

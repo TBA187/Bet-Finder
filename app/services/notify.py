@@ -11,7 +11,7 @@ pricing errors, strong value bets, arbitrage and new Daily Picks coupons.
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timedelta
+from datetime import timedelta
 from typing import Optional
 
 import httpx
@@ -72,8 +72,6 @@ def collect_alerts(settings: dict, analyses: list[dict], picks: Optional[dict]) 
     min_ev = float(settings.get("notify_min_ev_pct", 6.0))
     for a in analyses:
         fx = a["fixture"]
-        if fx.get("is_demo"):
-            continue
         name = f"{fx['home']} vs {fx['away']}"
         for s in a["selections"]:
             base = f"{fx['id']}:{s['market_id']}:{s['selection']}:{s['best']['bookmaker']}:{s['best']['odds']}"
@@ -90,9 +88,7 @@ def collect_alerts(settings: dict, analyses: list[dict], picks: Optional[dict]) 
                                 f"{_t(lang, 'arb')}: {name} – {m['label']} +{m['arbitrage_pct']:.1f}%"))
     if picks and settings.get("notify_on_picks"):
         for c in picks.get("coupons", []):
-            if c.get("is_demo"):
-                continue
-            legs = ", ".join(f"{leg['selection_label']} @ {leg['odds']:.2f}" for leg in c["legs"])
+            legs =", ".join(f"{leg['selection_label']} @ {leg['odds']:.2f}" for leg in c["legs"])
             out.append((f"pick:{picks['date']}:{c['id']}", f"{_t(lang, 'pick')} ({c['combined_odds']:.2f}): {legs}"))
     return out
 

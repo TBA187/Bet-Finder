@@ -48,9 +48,9 @@ const DEV_CLS = { normal: "green", warning: "amber", alert: "red" };
 const devChip = (d) => (d && d !== "normal" ? `<span class="chip ${DEV_CLS[d]}"><i class="light ${d}"></i>${esc(t(`dev_${d}`))}</span>` : "");
 const FLAG_CLS = { possible_pricing_error: "red", outlier_price: "orange", above_market: "blue", arbitrage: "violet" };
 const flagChip = (f) => (FLAG_CLS[f] ? chip(FLAG_CLS[f], t(`flag_${f}`)) : "");
-const SRC_CLS = { live: "green", scraped: "orange", manual: "amber", demo: "violet", historical: "blue", missing: "", confirmed: "green", unconfirmed: "amber" };
+const SRC_CLS = { live: "green", scraped: "orange", manual: "amber", historical: "blue", missing: "", confirmed: "green", unconfirmed: "amber" };
 const srcChip = (s) => chip(SRC_CLS[s] ?? "", t(`src_${s}`));
-function sourceKind(src) { return src === "demo" ? "demo" : src === "manual" ? "manual" : src === "scraper" ? "scraped" : "live"; }
+function sourceKind(src) { return src === "manual" ? "manual" : src === "scraper" ? "scraped" : "live"; }
 
 function fmtTime(iso) {
   if (!iso) return "–";
@@ -397,7 +397,7 @@ function renderMatch(a) {
   const sels = a.selections.filter((s) => s.ev_pct != null).sort((x, y) => y.ev_pct - x.ev_pct);
   return backBtn() + `
   <div class="card">
-    <div class="fx-meta"><span>${sportIcon(fx.sport)} ${esc(a.competition.name)} · ${fmtTime(fx.kickoff)}</span><span>${fx.is_demo ? chip("violet", t("demo")) : ""} ${fx.status !== "scheduled" ? chip("amber", fx.status) : ""}</span></div>
+    <div class="fx-meta"><span>${sportIcon(fx.sport)} ${esc(a.competition.name)} · ${fmtTime(fx.kickoff)}</span><span>${fx.status !== "scheduled" ? chip("amber", fx.status) : ""}</span></div>
     <h1 class="fx-teams" style="font-size:1.25rem">${esc(fx.home)}<span class="vs">vs</span>${esc(fx.away)}</h1>
     <div class="grid-2">
       <div class="tile static"><div class="k">${esc(t("m_conf"))}</div><div class="v">${a.confidence}<span class="small muted">/100</span></div>
@@ -596,7 +596,7 @@ function couponCard(cp) {
     <div class="small muted">${esc(l.explanation)}</div><a class="small" href="#match/${encodeURIComponent(l.fixture_id)}">${esc(t("full_analysis"))}</a></div>`).join("");
   const PROF = { safe: ["green", "pf_safe_d"], value: ["blue", "pf_value_d"], big: ["violet", "pf_big_d"] };
   const prof = PROF[cp.profile];
-  return `<div class="card coupon"><div class="coupon-head"><div><h2 style="font-size:1.1rem">${esc(cp.title)} ${cp.is_demo ? chip("violet", t("demo")) : ""}</h2>
+  return `<div class="card coupon"><div class="coupon-head"><div><h2 style="font-size:1.1rem">${esc(cp.title)}</h2>
       <div class="small muted">${esc(t("c_legs", { n: cp.legs.length }))} · ${riskChip(cp.risk_rating)}</div>
       ${prof ? `<div class="tiny muted" style="margin-top:3px">${esc(t(prof[1]))}</div>` : ""}</div>
       <div class="coupon-total"><div class="big odds">${fmtOdds(cp.combined_odds)}</div><div class="tiny muted">${esc(t("c_combined"))}</div></div></div>
@@ -721,7 +721,7 @@ function onAddSearch(input) {
     try {
       const items = await api(`/api/fixtures/search?q=${encodeURIComponent(q)}&sport=${state.add.sport}`);
       state.add._search = items;
-      box.innerHTML = items.length ? `<div class="results-list">${items.map((f, i) => `<button type="button" data-action="addPick" data-i="${i}"><b>${esc(f.home)} vs ${esc(f.away)}</b> ${f.is_demo ? chip("violet", t("demo")) : ""}<div class="small muted">${esc(f.competition)} · ${fmtTime(f.kickoff)}</div></button>`).join("")}</div>`
+      box.innerHTML = items.length ? `<div class="results-list">${items.map((f, i) => `<button type="button" data-action="addPick" data-i="${i}"><b>${esc(f.home)} vs ${esc(f.away)}</b><div class="small muted">${esc(f.competition)} · ${fmtTime(f.kickoff)}</div></button>`).join("")}</div>`
         : `<div class="small muted" style="margin-top:6px">${esc(t("add_none_found"))}</div>`;
     } catch (err) { box.innerHTML = errorBox(err); }
   }, 250);
@@ -802,7 +802,7 @@ async function viewArbitrage(token) {
     const list = await api(`/api/arbitrage?stake=${encodeURIComponent(stake)}`);
     if (token !== state.routeToken) return;
     view.innerHTML = top + (list.length ? list.map((x) => `<div class="card" style="margin-top:10px">
-      <div class="fx-meta"><span>${sportIcon(x.fixture.sport)} ${esc(x.competition)} · ${fmtTime(x.fixture.kickoff)}</span>${x.fixture.is_demo ? chip("violet", t("demo")) : ""}</div>
+      <div class="fx-meta"><span>${sportIcon(x.fixture.sport)} ${esc(x.competition)} · ${fmtTime(x.fixture.kickoff)}</span></div>
       <div class="spread"><a href="#match/${encodeURIComponent(x.fixture.id)}"><b>${esc(x.fixture.home)} vs ${esc(x.fixture.away)}</b></a><span class="pos" style="font-weight:750">+${x.profit_pct}%</span></div>
       <div class="small muted">${esc(x.market_label)} · ${esc(t("arb_profit", { p: x.profit_pct, a: x.profit_amount }))}</div>
       <ul class="small" style="margin:8px 0 0;padding-left:18px">${x.legs.map((l) => `<li>${esc(t("arb_place", { s: l.stake, l: l.label, o: fmtOdds(l.odds), b: l.bookmaker }))} ${l.flags.includes("stale") ? chip("amber", t("stale")) : ""}</li>`).join("")}</ul></div>`).join("")
@@ -862,7 +862,7 @@ function renderTracker(d) {
       <span class="muted">· ${esc(l.match)} · ${fmtTime(l.kickoff)}</span> ${l.result ? chip(l.result.includes("win") ? "green" : l.result.includes("lose") ? "red" : "", l.result.replace("_", " ")) : ""}
       ${l.clv_pct != null ? `<span class="${evClass(l.clv_pct)}"> · ${esc(t("tr_clv"))} ${fmtEv(l.clv_pct)}</span>` : ""}${l.ev_pct != null ? `<span class="muted"> · ${esc(t("tr_ev_pick"))} ${fmtEv(l.ev_pct)}</span>` : ""}</div>`).join("");
     return `<div class="card"><div class="spread"><b>${esc(it.title)}</b>${chip(cls, t(`st_${it.status}`))}</div>
-      <div class="small muted">${fmtTime(it.created_at)} · ${esc(t("tr_meta", { s: it.stake, o: fmtOdds(it.combined_odds) }))}${it.profit != null ? ` · ${esc(t("tr_profit_l"))} <span class="${evClass(it.profit)}">${it.profit > 0 ? "+" : ""}${it.profit}</span>` : ""} ${it.is_demo ? chip("violet", t("demo")) : ""}</div>
+      <div class="small muted">${fmtTime(it.created_at)} · ${esc(t("tr_meta", { s: it.stake, o: fmtOdds(it.combined_odds) }))}${it.profit != null ? ` · ${esc(t("tr_profit_l"))} <span class="${evClass(it.profit)}">${it.profit > 0 ? "+" : ""}${it.profit}</span>` : ""}</div>
       ${legs}<div class="row wrap" style="margin-top:10px">
         ${it.status === "pending" ? ["won", "lost", "void"].map((v) => `<button class="btn ghost small" data-action="settle" data-id="${esc(it.id)}" data-v="${v}">${esc(t(v === "won" ? "tr_won" : v === "lost" ? "tr_lost" : "tr_void"))}</button>`).join("")
           : it.manual_result ? `<button class="btn ghost small" data-action="settle" data-id="${esc(it.id)}" data-v="pending">${esc(t("tr_reopen"))}</button>` : ""}

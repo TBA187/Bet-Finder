@@ -13,7 +13,6 @@ The two sports deliberately use different parameters:
 from __future__ import annotations
 
 import math
-from typing import Optional
 
 from app.core.markets import is_quarter_line, is_whole_line
 from app.core.models import TeamStats

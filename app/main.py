@@ -19,7 +19,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from app.config import APP_VERSION, BASE_DIR, Paths, SettingsError, SettingsService, tz
-from app.core.models import Fixture, utcnow
+from app.core.models import Fixture
 from app.core.odds_math import OddsError
 from app.services import notify
 from app.services.analysis import AnalysisService
@@ -48,10 +48,6 @@ class Container:
         self.refresh = RefreshService(self.repo, self.registry, self.settings, self.tracker)
         self.refresh.after = self._after_refresh
         self.auth = AuthService(self.store)
-        try:  # BetFinder uses live data only: remove anything left from the old demo mode
-            self.repo.purge_demo()
-        except Exception:
-            log.exception("could not purge old demo data")
         try:  # first start: super admin  admin / admin  (BetFinder asks to change it)
             self.auth.ensure_admin()
         except Exception:
@@ -60,7 +56,7 @@ class Container:
     # shared views used by several endpoints and by the scheduler -----------
     def upcoming(self, now: datetime, s: dict) -> list[Fixture]:
         horizon = now + timedelta(hours=int(s["lookahead_hours"]))
-        return sorted((fx for fx in self.repo.fixtures(include_demo=False)
+        return sorted((fx for fx in self.repo.fixtures()
                        if fx.status == "scheduled" and now < fx.kickoff <= horizon), key=lambda f: f.kickoff)
 
     def analyses(self, now: datetime, s: dict) -> list[dict]:
@@ -72,13 +68,16 @@ class Container:
             key = json.dumps([(leg["fixture_id"], leg["market_id"], leg["selection"], leg["bookmaker"], leg["odds"])
                               for leg in coupon["legs"]])
             coupon["id"] = hashlib.sha1(key.encode()).hexdigest()[:12]
-        with self.store.edit("daily_picks", {}) as data:
-            day = data.setdefault(result["date"], {"coupons": {}, "latest": None})
-            for coupon in result["coupons"]:
-                day["coupons"][coupon["id"]] = coupon
-            day["latest"] = {k: v for k, v in result.items() if k != "singles"}
-            for old in sorted(data)[:-30]:
-                data.pop(old, None)
+        # Coupons are kept by id so "Track coupon" still finds them later.  Only write when
+        # something changed: every write also resets the analysis cache for all visitors.
+        stored = (self.store.read("daily_picks", {}).get(result["date"]) or {}).get("coupons") or {}
+        if any(stored.get(coupon["id"]) != coupon for coupon in result["coupons"]):
+            with self.store.edit("daily_picks", {}) as data:
+                day = data.setdefault(result["date"], {})
+                day.pop("latest", None)  # no longer stored
+                day.setdefault("coupons", {}).update({coupon["id"]: coupon for coupon in result["coupons"]})
+                for old in sorted(data)[:-30]:
+                    data.pop(old, None)
         return result
 
     async def _after_refresh(self, client, settings: dict, now: datetime) -> dict:

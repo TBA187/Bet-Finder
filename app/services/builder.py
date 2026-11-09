@@ -15,7 +15,6 @@ For other sports same-match correlation is not modelled and a warning is shown.
 from __future__ import annotations
 
 import math
-from datetime import datetime
 from typing import Optional
 
 from app.core.odds_math import combined_odds

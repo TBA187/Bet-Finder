@@ -76,8 +76,6 @@ def stance(rep: AgentReport, market: str, selection: str) -> str:
 
 
 def _source_kind(source: str) -> str:
-    if source == "demo":
-        return "demo"
     if source == "manual":
         return "manual"
     if source == "scraper":
@@ -270,7 +268,7 @@ class AnalysisService:
         return {
             "id": fx.id, "sport": fx.sport, "competition_id": fx.competition_id, "competition": fx.competition_name,
             "home": fx.home, "away": fx.away, "kickoff": fx.kickoff.isoformat(), "status": fx.status,
-            "score_home": fx.score_home, "score_away": fx.score_away, "is_demo": fx.is_demo, "manual": fx.manual,
+            "score_home": fx.score_home, "score_away": fx.score_away, "manual": fx.manual,
             "sources": sorted(fx.refs),
         }
 
@@ -284,7 +282,7 @@ class AnalysisService:
             entry = kinds.setdefault(k, {"updated_at": q.fetched_at, "sources": set()})
             entry["sources"].add(q.source)
             entry["updated_at"] = max(entry["updated_at"], q.fetched_at)
-        for k in ("live", "scraped", "manual", "demo"):
+        for k in ("live", "scraped", "manual"):
             if k in kinds:
                 items.append({"kind": "odds", "status": k, "sources": sorted(kinds[k]["sources"]),
                               "updated_at": kinds[k]["updated_at"].isoformat()})
@@ -293,22 +291,20 @@ class AnalysisService:
         stats = [s for s in (hs, as_) if s]
         if stats:
             src = sorted({s.source for s in stats} | {s.xg_source for s in stats if s.xg_source})
-            status = "demo" if "demo" in src else "manual" if src == ["manual"] else "historical"
+            status = "manual" if src == ["manual"] else "historical"
             items.append({"kind": "statistics", "status": status, "sources": src,
                           "updated_at": max(s.fetched_at for s in stats).isoformat()})
         else:
             items.append({"kind": "statistics", "status": "missing", "sources": [], "updated_at": None})
         manual_abs = [a for a in absences if a.source == "manual"]
         if absences_source:
-            items.append({"kind": "injuries", "status": "demo" if absences_source == "demo" else "live",
-                          "sources": [absences_source], "updated_at": prov_news.get("absences_at")})
+            items.append({"kind": "injuries", "status": "live", "sources": [absences_source],
+                          "updated_at": prov_news.get("absences_at")})
         if manual_abs:
             items.append({"kind": "injuries", "status": "manual", "sources": ["manual"],
                           "updated_at": max(a.added_at for a in manual_abs).isoformat()})
         if not absences_source and not manual_abs:
-            demo_abs = [a for a in absences if a.source == "demo"]
-            items.append({"kind": "injuries", "status": "demo" if demo_abs else "missing",
-                          "sources": ["demo"] if demo_abs else [], "updated_at": None})
+            items.append({"kind": "injuries", "status": "missing", "sources": [], "updated_at": None})
         statuses = [lineups[s].status for s in ("home", "away")]
         lu_status = "confirmed" if statuses == ["confirmed", "confirmed"] else (
             "unconfirmed" if any(s != "unknown" for s in statuses) else "missing")

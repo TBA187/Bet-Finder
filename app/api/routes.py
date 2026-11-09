@@ -184,7 +184,7 @@ def build_router(c) -> APIRouter:  # c: Container
             return fixture_or_404(body.fixture_id), "selected match"
         if not (body.sport and body.home and body.away):
             raise HTTPException(400, tr(L, "err_choose_match"))
-        pool = [f for f in c.repo.fixtures(include_demo=False)
+        pool = [f for f in c.repo.fixtures()
                 if f.kickoff > now - timedelta(hours=3) and f.status in ("scheduled", "live")]
         kickoff = body.kickoff.astimezone(timezone.utc) if body.kickoff else None
         hit = find_fixture(body.sport, body.home, body.away, kickoff, pool,
@@ -205,7 +205,7 @@ def build_router(c) -> APIRouter:  # c: Container
         cname = comp["name"] if comp else (body.competition_name or "Other")
         fx = Fixture(id=fixture_id_for(body.sport, body.home.strip(), body.away.strip(), kickoff), sport=body.sport,
                      competition_id=cid, competition_name=cname, home=body.home.strip(), away=body.away.strip(),
-                     kickoff=kickoff, manual=True, is_demo=False, refs={"manual": "1"})
+                     kickoff=kickoff, manual=True, refs={"manual": "1"})
         c.repo.save_fixture(fx)
         return fx, "new match created"
 
@@ -257,7 +257,8 @@ def build_router(c) -> APIRouter:  # c: Container
         s = settings()
         pstatus = c.repo.provider_status()
         now = utcnow()
-        fixtures = c.repo.fixtures(include_demo=False)
+        fixtures = c.repo.fixtures()
+        with_odds = c.repo.fixture_ids_with_odds()
         usage = insights.usage(pstatus, s, c.refresh.providers(s), c.settings.secret_source, now)
         return {
             "version": APP_VERSION, "now": now.isoformat(), "language": lang_of(s),
@@ -265,7 +266,7 @@ def build_router(c) -> APIRouter:  # c: Container
             "cron_configured": bool(os.environ.get("CRON_SECRET")),
             "providers": usage["providers"], "manual_entry": True, "scraper_mode": s["scraper_mode"],
             "last_refresh": c.refresh.last(), "refresh_running": c.refresh.running,
-            "fixtures": len(fixtures), "fixtures_with_odds": sum(1 for fx in fixtures if c.repo.quotes(fx.id)),
+            "fixtures": len(fixtures), "fixtures_with_odds": sum(1 for fx in fixtures if fx.id in with_odds),
             "registry_errors": c.registry.errors,
             "any_live_source": any(p["configured"] and p["method"] == "api" for p in usage["providers"]),
             "notifications": notify.enabled(s),
@@ -280,12 +281,11 @@ def build_router(c) -> APIRouter:  # c: Container
         """For schedulers (Vercel Cron, GitHub Actions, cron-job.org).
         Send header  Authorization: Bearer <CRON_SECRET>."""
         secret = os.environ.get("CRON_SECRET", "").strip()
-        if secret:
-            sent = request.headers.get("authorization", "")
-            if not hmac.compare_digest(sent, f"Bearer {secret}"):
-                raise HTTPException(401, "Invalid cron secret")
-        elif os.environ.get("VERCEL"):
-            raise HTTPException(401, "Set CRON_SECRET in the Vercel environment variables first")
+        if not secret:  # without a secret anyone could start refreshes and spend API credits
+            raise HTTPException(401, "Set the CRON_SECRET environment variable first")
+        sent = request.headers.get("authorization", "")
+        if not hmac.compare_digest(sent.encode(), f"Bearer {secret}".encode()):
+            raise HTTPException(401, "Invalid cron secret")
         result = await c.refresh.run()
         return {"status": result.get("status"), "at": result.get("at"), "odds_methods": result.get("odds_methods"),
                 "quotes": sum(p.get("quotes", 0) for p in result.get("providers", [])),
@@ -407,7 +407,7 @@ def build_router(c) -> APIRouter:  # c: Container
         s = settings()
         now = utcnow()
         scored = []
-        for fx in c.repo.fixtures(include_demo=False):
+        for fx in c.repo.fixtures():
             if (sport and fx.sport != sport) or fx.kickoff < now - timedelta(hours=3):
                 continue
             score = search_score(q, fx.home, fx.away)
@@ -415,7 +415,7 @@ def build_router(c) -> APIRouter:  # c: Container
                 scored.append((score, fx))
         scored.sort(key=lambda x: (-x[0], x[1].kickoff))
         return [{"id": fx.id, "sport": fx.sport, "home": fx.home, "away": fx.away, "competition": fx.competition_name,
-                 "competition_id": fx.competition_id, "kickoff": fx.kickoff.isoformat(), "is_demo": fx.is_demo,
+                 "competition_id": fx.competition_id, "kickoff": fx.kickoff.isoformat(),
                  "score": round(sc, 2)} for sc, fx in scored[:limit]]
 
     @r.get("/fixtures/{fid}")
@@ -580,8 +580,6 @@ def build_router(c) -> APIRouter:  # c: Container
             for q in quotes:
                 entry = seen.setdefault(q.bookmaker, {"auto_last": None, "auto_quotes": 0, "manual_quotes": 0,
                                                       "scraped_quotes": 0, "via": set()})
-                if q.source == "demo":
-                    continue
                 if q.source == "manual":
                     entry["manual_quotes"] += 1
                     continue
@@ -618,7 +616,7 @@ def build_router(c) -> APIRouter:  # c: Container
             out.append(row(b["key"], b["name"], b, seen.get(b["key"], {})))
         known = {b["key"] for b in out}
         for key, info in seen.items():
-            if key not in known and not key.startswith("demo_"):
+            if key not in known:
                 out.append(row(key, c.registry.bookmaker_name(key), None, info))
         out.sort(key=lambda b: (not b["priority"], b["state"] not in ("connected", "scraped"), b["name"].lower()))
         return out
@@ -634,8 +632,7 @@ def build_router(c) -> APIRouter:  # c: Container
                           "odds_source": "the_odds_api" if prov.get("the_odds_api") else None,
                           "stats_source": "api_sports" if prov.get("api_sports") else None})
         plan = insights.credit_plan(s, c.registry.competitions())
-        return {"items": items, "excluded_by_request": [], "odds_api_cost_per_refresh": plan["credits_per_refresh"],
-                "credit_plan": plan}
+        return {"items": items, "credit_plan": plan}
 
     @r.put("/competitions/{cid}")
     def toggle_competition(cid: str, body: CompetitionToggle):

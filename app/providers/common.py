@@ -2,14 +2,13 @@
 scraper): matching external events to known fixtures and competitions."""
 from __future__ import annotations
 
+import re
 from datetime import datetime, timedelta, timezone
+from difflib import SequenceMatcher
 from typing import Any, Optional
 
-from app.core.markets import market_id, swap_sides
+from app.core.markets import swap_sides
 from app.core.models import Fixture, Quote
-import re
-from difflib import SequenceMatcher
-
 from app.core.names import find_fixture, strip_accents
 from app.services.registry import Registry
 from app.services.repository import Repository
@@ -47,7 +46,7 @@ def as_list(data: Any) -> list:
 
 def upcoming(repo: Repository, now: datetime, hours: int) -> list[Fixture]:
     horizon = now + timedelta(hours=hours)
-    return [f for f in repo.fixtures(include_demo=False) if f.status == "scheduled" and now < f.kickoff <= horizon]
+    return [f for f in repo.fixtures() if f.status == "scheduled" and now < f.kickoff <= horizon]
 
 
 def _league_norm(text: str) -> str:
@@ -119,17 +118,3 @@ def make_quotes(fx: Fixture, swapped: bool, items: list[tuple], bookmaker: str, 
             continue
         out[q.key] = q
     return list(out.values())
-
-
-def complete_only(fx: Fixture, quotes: list[Quote]) -> list[Quote]:
-    """Drop half markets (a lone 'over' without its 'under' etc.)."""
-    from app.core.markets import selections_for
-    groups: dict[tuple, list[Quote]] = {}
-    for q in quotes:
-        groups.setdefault((q.bookmaker, market_id(q.market, q.line)), []).append(q)
-    keep = []
-    for (_bk, _mid), qs in groups.items():
-        need = set(selections_for(fx.sport, qs[0].market))
-        if need <= {q.selection for q in qs}:
-            keep.extend(qs)
-    return keep

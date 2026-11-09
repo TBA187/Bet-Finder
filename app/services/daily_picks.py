@@ -65,7 +65,6 @@ def _leg(analysis: dict, sel: dict, tier: str) -> dict:
         "sport": fx["sport"],
         "competition": analysis["competition"]["name"],
         "kickoff": fx["kickoff"],
-        "is_demo": fx["is_demo"],
         "market_id": sel["market_id"],
         "market": sel["market"],
         "line": sel["line"],
@@ -269,7 +268,6 @@ def _coupon(legs: list[dict], number: int, profile: str, settings: dict, lang: s
         "stake_pct": round(stake * 100, 2),
         "stake_amount": round(stake * float(settings["bankroll"]), 2),
         "currency": settings.get("currency", "DKK"),
-        "is_demo": any(leg["is_demo"] for leg in legs),
         "has_strong": any(leg["tier"] == "strong" for leg in legs),
         "note": tr(lang, "dp_indep"),
     }

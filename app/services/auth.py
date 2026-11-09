@@ -434,8 +434,9 @@ class AuthService:
             "user_id": user["id"], "epoch": int(user.get("epoch", 1)), "created_at": _iso(now),
             "expires_at": _iso(now + timedelta(seconds=lifetime)), "remember": remember, "ip": ip, "agent": agent[:160],
         }, pretty=False, ttl=lifetime)
-        if secrets.randbelow(20) == 0:  # files backend: remove old sessions now and then
-            self.store.cleanup("sessions/", SESSION_DAYS * 86400 + 86400)
+        if secrets.randbelow(20) == 0:  # files backend: remove old sessions and sign-in counters now and then
+            self.store.cleanup("sessions/", SESSION_DAYS * 86400 + 86400)  # (Redis expires them by itself)
+            self.store.cleanup("auth_limits/", 86400)
         return token, lifetime
 
     def session_user(self, token: Optional[str]) -> Optional[dict]:

@@ -211,10 +211,6 @@ def norm_cdf(x: float) -> float:
     return _STD_NORMAL.cdf(x)
 
 
-def norm_ppf(p: float) -> float:
-    return _STD_NORMAL.inv_cdf(clamp(p, 1e-9, 1 - 1e-9))
-
-
 def normalise(probs: dict[str, float]) -> dict[str, float]:
     total = sum(probs.values())
     if total <= 0:

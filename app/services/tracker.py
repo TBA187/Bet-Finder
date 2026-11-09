@@ -6,8 +6,8 @@ kick-off (built from the stored price history):
     CLV % = (odds taken x closing fair probability - 1) x 100
 
 Beating the closing line consistently is the best available evidence that the
-value detection works.  Unlike the previous version, nothing here is invented:
-every record comes from a selection you chose to track.
+value detection works.  Nothing here is invented: every record comes from a
+selection you chose to track.
 """
 from __future__ import annotations
 
@@ -65,7 +65,7 @@ class TrackerService:
                 raise TrackerError(f"{fx.name} has already started; only pre-match prices can be tracked")
             clean.append({
                 "fixture_id": fx.id, "match": fx.name, "sport": fx.sport, "competition": fx.competition_name,
-                "kickoff": fx.kickoff.isoformat(), "is_demo": fx.is_demo,
+                "kickoff": fx.kickoff.isoformat(),
                 "market": leg["market"], "line": leg.get("line"), "market_id": leg["market_id"],
                 "market_label": leg.get("market_label", leg["market_id"]),
                 "selection": leg["selection"], "selection_label": leg.get("selection_label", leg["selection"]),
@@ -80,7 +80,7 @@ class TrackerService:
         item = {
             "id": uuid.uuid4().hex[:12], "created_at": utcnow().isoformat(), "kind": "coupon" if len(clean) > 1 else "single",
             "title": title, "stake": float(stake), "source": source, "note": note,
-            "is_demo": any(leg["is_demo"] for leg in clean), "legs": clean, "combined_odds": round(total, 3),
+            "legs": clean, "combined_odds": round(total, 3),
             "status": "pending", "return": None, "profit": None, "manual_result": False, "owner": owner,
         }
         with self.repo.store.edit(self.FILE, []) as data:
@@ -113,11 +113,16 @@ class TrackerService:
         now = utcnow()
         changed = False
         items = self._items()
+        fixtures: Optional[dict] = None  # loaded once, and only when a leg still needs work
         for item in items:
             if item.get("manual_result"):
                 continue
             for leg in item["legs"]:
-                fx = self.repo.fixture(leg["fixture_id"])
+                if leg["result"] is not None and leg["clv_pct"] is not None:
+                    continue
+                if fixtures is None:
+                    fixtures = {f.id: f for f in self.repo.fixtures()}
+                fx = fixtures.get(leg["fixture_id"])
                 if not fx:
                     continue
                 if leg["clv_pct"] is None and fx.kickoff <= now:
@@ -173,24 +178,21 @@ class TrackerService:
         return out or None
 
     # ------------------------------------------------------------------ read
-    def overview(self, settings: dict, include_demo: bool = True, owner: Optional[str] = None, legacy: bool = False) -> dict:
+    def overview(self, settings: dict, owner: Optional[str] = None, legacy: bool = False) -> dict:
         self.refresh(settings)
         items = sorted((i for i in self._items() if self._mine(i, owner, legacy)),
                        key=lambda i: i.get("created_at", ""), reverse=True)
-        if not include_demo:
-            items = [i for i in items if not i.get("is_demo")]
-        real = [i for i in items if not i.get("is_demo")]
-        settled = [i for i in real if i["status"] not in ("pending",) and i.get("profit") is not None]
+        settled = [i for i in items if i["status"] != "pending" and i.get("profit") is not None]
         staked = sum(i["stake"] for i in settled)
         profit = sum(i["profit"] for i in settled)
-        legs = [leg for i in real for leg in i["legs"]]
+        legs = [leg for i in items for leg in i["legs"]]
         clvs = [leg["clv_pct"] for leg in legs if leg.get("clv_pct") is not None]
         evs = [leg["ev_pct"] for leg in legs if leg.get("ev_pct") is not None]
         wins = sum(1 for i in settled if i["status"] in ("won", "half_won"))
         return {
             "items": items,
             "summary": {
-                "tracked": len(real), "settled": len(settled), "pending": sum(1 for i in real if i["status"] == "pending"),
+                "tracked": len(items), "settled": len(settled), "pending": sum(1 for i in items if i["status"] == "pending"),
                 "won": wins, "hit_rate_pct": round(100 * wins / len(settled), 1) if settled else None,
                 "staked": round(staked, 2), "profit": round(profit, 2),
                 "roi_pct": round(100 * profit / staked, 2) if staked else None,
@@ -198,7 +200,6 @@ class TrackerService:
                 "avg_clv_pct": round(sum(clvs) / len(clvs), 2) if clvs else None,
                 "clv_beat_rate_pct": round(100 * sum(1 for c in clvs if c > 0) / len(clvs), 1) if clvs else None,
                 "clv_samples": len(clvs),
-                "demo_excluded": True,
             },
         }
 

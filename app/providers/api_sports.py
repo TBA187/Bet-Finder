@@ -15,7 +15,7 @@ from typing import Any, Optional
 
 import httpx
 
-from app.core.markets import market_id, normalise_line, swap_sides
+from app.core.markets import normalise_line, swap_sides
 from app.core.models import Fixture, Quote, TeamStats, utcnow
 from app.core.names import normalise_team
 from app.providers.http import Budget, CachedClient, ProviderError

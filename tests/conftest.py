@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -15,6 +16,17 @@ from app.services.repository import Repository
 from app.storage.json_store import JsonStore
 
 NOW = datetime(2026, 11, 8, 12, 0, tzinfo=timezone.utc)
+
+
+@pytest.fixture(autouse=True)
+def isolated_env(monkeypatch):
+    """Tests must never use real keys, real storage (Redis) or the internet, whatever is set in the shell."""
+    for name in list(os.environ):
+        if (name.startswith(("BETFINDER_", "SMTP_", "UPSTASH_", "KV_", "TELEGRAM_")) or name.endswith("_REST_API_URL")
+                or name.endswith("_REST_API_TOKEN") or name in (
+                    "ODDS_API_KEY", "API_SPORTS_KEY", "ODDS_API_IO_KEY", "ODDSPAPI_KEY", "CRON_SECRET",
+                    "REDIS_URL", "STORAGE_URL", "VERCEL")):
+            monkeypatch.delenv(name, raising=False)
 
 
 @pytest.fixture
@@ -48,10 +60,7 @@ def analysis(repo, registry) -> AnalysisService:
 
 
 @pytest.fixture
-def client(paths, monkeypatch):
-    monkeypatch.delenv("BETFINDER_TOKEN", raising=False)
-    monkeypatch.delenv("ODDS_API_KEY", raising=False)
-    monkeypatch.delenv("API_SPORTS_KEY", raising=False)
+def client(paths):
     app = create_app(paths, background=False)
     with TestClient(app) as c:
         # every API call needs a signed-in account: use the first super admin

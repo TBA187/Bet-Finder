@@ -1,3 +1,4 @@
+.env
 .venv
 tests
 data/runtime

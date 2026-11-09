@@ -54,32 +54,21 @@ def test_live_only_no_demo(client):
         client.post("/api/manual/odds", json={"sport": "football", "home": "Live A", "away": "Live B", "kickoff": ko,
                                               "bookmaker": book, "market": "h2h", "prices": prices})
     items = client.get("/api/scanner").json()["items"]
-    assert items and not any(i["fixture"]["is_demo"] for i in items)
+    assert items
     a = client.get(f"/api/fixtures/{items[0]['fixture']['id']}").json()
     assert {d["status"] for d in a["data_status"] if d["kind"] == "odds"} == {"manual"}
-
-
-def test_old_demo_data_is_purged(paths):
-    from app.core.models import Fixture
-    from app.main import create_app
-    from app.services.repository import Repository
-    from app.storage.json_store import JsonStore
-    repo = Repository(JsonStore(paths.runtime))
-    repo.save_fixture(Fixture(id="old-demo", sport="football", competition_id="demo.football", competition_name="Demo",
-                              home="Demo A", away="Demo B", kickoff=utcnow() + timedelta(hours=2), is_demo=True))
-    repo.store.write("settings", {"demo_mode": True})
-    create_app(paths, background=False)
-    assert repo.fixture("old-demo") is None and "demo_mode" not in repo.store.read("settings", {})
+    assert client.get("/api/status").json()["fixtures_with_odds"] == 1
 
 
 def test_cron_endpoint_auth(paths, monkeypatch):
     from fastapi.testclient import TestClient
     from app.main import create_app
-    monkeypatch.setenv("CRON_SECRET", "cron-123")
     with TestClient(create_app(paths, background=False)) as c:
         c.post("/api/auth/login", json={"login": "admin", "password": "admin"})
         assert c.put("/api/settings", json={"scraper_mode": "off"}).status_code == 200
         c.post("/api/auth/logout")
+        assert c.get("/api/cron/refresh").status_code == 401  # no CRON_SECRET configured: always refused
+        monkeypatch.setenv("CRON_SECRET", "cron-123")
         assert c.get("/api/cron/refresh").status_code == 401
         assert c.get("/api/cron/refresh", headers={"Authorization": "Bearer wrong"}).status_code == 401
         r = c.get("/api/cron/refresh", headers={"Authorization": "Bearer cron-123"})
@@ -180,7 +169,7 @@ ODDS_API_EVENT = {
 
 def test_odds_api_ingest(repo, registry, settings):
     p = TheOddsApiProvider(repo, registry, {**settings, "odds_api_key": "k"})
-    n = p._ingest(ODDS_API_EVENT, registry.competition("football.epl"), NOW)
+    n = p._ingest(ODDS_API_EVENT, registry.competition("football.epl"), "soccer_epl", NOW)
     assert n == 3 + 2 + 3 + 2
     fx = repo.fixtures()[0]
     quotes = repo.quotes(fx.id)
@@ -190,11 +179,45 @@ def test_odds_api_ingest(repo, registry, settings):
     assert spreads == {"home": -0.5, "away": -0.5}  # away +0.5 == home line -0.5
     # past events (live) are ignored
     assert p._ingest({**ODDS_API_EVENT, "id": "ev2", "commence_time": "2026-11-08T10:00:00Z"},
-                     registry.competition("football.epl"), NOW) is None
+                     registry.competition("football.epl"), "soccer_epl", NOW) is None
 
+
+
+def test_odds_api_results_use_exact_sport_key(repo, registry, settings):
+    """Wildcard competitions (tennis_atp_*) must fetch results with the event's real sport key."""
+    import asyncio
+    from app.providers.the_odds_api import BASE
+    p = TheOddsApiProvider(repo, registry, {**settings, "odds_api_key": "k"})
+    comp = registry.competition("tennis.atp")
+    ev = {"id": "t1", "sport_key": "tennis_atp_paris", "commence_time": "2026-11-08T17:30:00Z",
+          "home_team": "Player A", "away_team": "Player B", "bookmakers": []}
+    p._ingest(ev, comp, "tennis_atp_paris", NOW)
+    calls = []
+
+    class FakeClient:
+        async def get_json(self, url, **_kw):
+            calls.append(url)
+            return [{"id": "t1", "completed": True, "home_team": "Player A", "away_team": "Player B",
+                     "scores": [{"name": "Player A", "score": "2"}, {"name": "Player B", "score": "1"}]}]
+
+    summary = {"errors": []}
+    settled = asyncio.run(p._scores(FakeClient(), [comp], NOW + timedelta(hours=8), summary))
+    assert calls == [f"{BASE}/sports/tennis_atp_paris/scores"] and settled == 1 and not summary["errors"]
+    fx = repo.fixtures()[0]
+    assert (fx.status, fx.score_home, fx.score_away) == ("finished", 2, 1)
+    assert fx.id not in repo.fixture_ids_with_odds()  # no prices: no (empty) odds document is kept
+
+
+def test_daily_picks_not_rewritten_when_unchanged(client):
+    store = client.app.state.container.store
+    client.get("/api/daily-picks")
+    version = store.version
+    client.get("/api/dashboard")
+    client.get("/api/daily-picks")
+    assert store.version == version  # nothing changed, so nothing was written (keeps the analysis cache warm)
 
 def test_fixtures_from_two_providers_merge(repo, registry, settings):
-    TheOddsApiProvider(repo, registry, settings)._ingest(ODDS_API_EVENT, registry.competition("football.epl"), NOW)
+    TheOddsApiProvider(repo, registry, settings)._ingest(ODDS_API_EVENT, registry.competition("football.epl"), "soccer_epl", NOW)
     from app.core.models import Fixture
     cand = Fixture(id="", sport="football", competition_id="football.epl", competition_name="Premier League",
                    home="Arsenal FC", away="Chelsea FC", kickoff=datetime(2026, 11, 8, 17, 30, tzinfo=timezone.utc),

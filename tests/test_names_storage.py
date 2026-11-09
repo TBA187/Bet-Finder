@@ -123,14 +123,6 @@ def test_repository_works_on_redis(monkeypatch):
     assert len(repo.quotes(fx.id)) == 3 and fx.id in repo.all_quotes()
 
 
-def test_file_store_migrates_single_odds_file(tmp_path):
-    from app.services.repository import Repository
-    s = JsonStore(tmp_path)
-    s.write("odds", {"fx-9": {"k": {"x": 1}}})
-    Repository(s)
-    assert not s.exists("odds") and s.read("odds/fx-9", {}) == {"k": {"x": 1}}
-
-
 def test_redis_url_store_and_selection(monkeypatch, tmp_path):
     """Standard Redis (REDIS_URL / STORAGE_URL, e.g. Redis Cloud) works like Upstash."""
     from app.storage import json_store

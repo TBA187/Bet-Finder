@@ -37,8 +37,6 @@ SPORTS: dict[str, dict] = {
                "unit": ("games", "partier"), "model": "binary", "markets": ("h2h", "totals", "spreads")},
 }
 
-SPORT_KEYS = tuple(SPORTS)
-
 
 def is_sport(value: str) -> bool:
     return value in SPORTS

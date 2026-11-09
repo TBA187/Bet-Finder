@@ -2,7 +2,7 @@
 
 Everything the analysis writes for humans (agent summaries, explanations,
 rejection reasons, ...) goes through ``tr(lang, key, **values)``.  The web
-UI has its own dictionary for interface labels (app/static/js/app.js).
+UI has its own dictionary for interface labels (app/static/js/i18n.js).
 """
 from __future__ import annotations
 

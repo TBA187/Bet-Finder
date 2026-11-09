@@ -1,15 +1,19 @@
 """Typed access to the JSON files in data/runtime.
 
-Files:
-    fixtures.json        {fixture_id: Fixture}
-    odds/<fixture>.json  {quote_key: Quote (+history)}  - one document per match
-    team_news.json       manual absences / lineup notes per fixture
-    provider_news.json   absences / lineups fetched from providers
-    team_stats.json      cached normalised team statistics
-    h2h.json             cached head-to-head meetings per fixture
-    bets.json            tracked selections / coupons
-    daily_picks.json     generated daily coupons per date
-    provider_status.json last call, errors and quota per provider
+Documents (JSON files locally, Redis keys on Vercel):
+    fixtures             {fixture_id: Fixture}
+    odds/<fixture>       {quote_key: Quote (+history)}  - one document per match
+    team_news            manual absences / lineups / xG per fixture
+    provider_news        absences / lineups fetched from providers
+    team_stats           cached normalised team statistics
+    team_lineups         last known lineup per team (to count changes)
+    h2h                  cached head-to-head meetings per fixture
+    provider_status      last call, errors and quota per provider
+    cache/<provider>/... provider response cache (expires)
+
+Other documents are owned by their services: settings (SettingsService),
+competition_overrides (Registry), bets (TrackerService), daily_picks (main.Container),
+notifications_log (notify), users/sessions/... (AuthService).
 """
 from __future__ import annotations
 
@@ -42,17 +46,6 @@ def _odds_name(fid: str) -> str:
 class Repository:
     def __init__(self, store: BaseStore):
         self.store = store
-        self._migrate()
-
-    def _migrate(self) -> None:
-        """v1.1 kept all odds in one odds.json; split it into one document per match."""
-        try:
-            if self.store.exists("odds"):
-                for fid, book in (self.store.read("odds", {}) or {}).items():
-                    self.store.write(_odds_name(fid), book, pretty=False)
-                self.store.delete("odds")
-        except Exception:  # never block start-up
-            log.exception("odds migration failed")
 
     # ------------------------------------------------------------------ fixtures
     def _load_fixtures(self) -> dict[str, Fixture]:
@@ -67,9 +60,8 @@ class Repository:
                 log.warning("Skipping invalid fixture %s: %s", fid, exc.errors()[:1])
         return out
 
-    def fixtures(self, include_demo: bool = True) -> list[Fixture]:
-        items = self._load_fixtures().values()
-        return [f for f in items if include_demo or not f.is_demo]
+    def fixtures(self) -> list[Fixture]:
+        return list(self._load_fixtures().values())
 
     def fixture(self, fid: str) -> Optional[Fixture]:
         return self._load_fixtures().get(fid)
@@ -100,8 +92,7 @@ class Repository:
                         target = fx
                         break
             if target is None:
-                pool = [f for f in existing.values() if f.is_demo == candidate.is_demo]
-                hit = find_fixture(candidate.sport, candidate.home, candidate.away, candidate.kickoff, pool)
+                hit = find_fixture(candidate.sport, candidate.home, candidate.away, candidate.kickoff, existing.values())
                 if hit:
                     target, _score, swapped = hit
             if target is None:
@@ -197,6 +188,8 @@ class Repository:
             if replace_source:
                 for key in [k for k, v in book.items() if v.get("source") == replace_source and k not in seen]:
                     del book[key]
+        if not book:  # never keep an empty document: the list of odds documents = matches with prices
+            self.store.delete(_odds_name(fid))
         return changed
 
     def delete_quotes(self, fid: str, source: Optional[str] = None, bookmaker: Optional[str] = None) -> int:
@@ -207,7 +200,13 @@ class Repository:
                 if (source is None or v.get("source") == source) and (bookmaker is None or v.get("bookmaker") == bookmaker):
                     del book[key]
                     removed += 1
+        if not book:
+            self.store.delete(_odds_name(fid))
         return removed
+
+    def fixture_ids_with_odds(self) -> set[str]:
+        """One listing instead of reading every odds document (much faster on Redis)."""
+        return {name.split("/", 1)[1] for name in self.store.list("odds/")}
 
     # ---------------------------------------------------------------- team news
     def team_news(self, fid: str) -> dict:
@@ -325,24 +324,3 @@ class Repository:
         old = [f.id for f in self.fixtures() if f.kickoff < cutoff and f.id not in keep]
         self.store.cleanup("cache/", 3 * 86400)  # provider response cache (Redis expires it by itself)
         return self.delete_fixtures(old)
-
-    def purge_demo(self) -> int:
-        """Remove everything created by the old demo mode (BetFinder is live-data only)."""
-        removed = self.delete_fixtures([f.id for f in self.fixtures() if f.is_demo])
-        stats = self.store.read("team_stats", {})
-        if any(k.startswith("demo:") for k in stats):
-            with self.store.edit("team_stats", {}, pretty=False) as data:
-                for k in [k for k in data if k.startswith("demo:")]:
-                    del data[k]
-        bets = self.store.read("bets", [])
-        if any(b.get("is_demo") for b in bets):
-            with self.store.edit("bets", []) as data:
-                data[:] = [b for b in data if not b.get("is_demo")]
-        picks = self.store.read("daily_picks", {})
-        if any(c.get("is_demo") for d in picks.values() for c in (d.get("coupons") or {}).values()):
-            self.store.write("daily_picks", {})
-        settings = self.store.read("settings", {})
-        if "demo_mode" in settings:
-            with self.store.edit("settings", {}) as data:
-                data.pop("demo_mode", None)
-        return removed

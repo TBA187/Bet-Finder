@@ -15,7 +15,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from app.core.odds_math import DEVIG_METHODS
 from app.storage.json_store import JsonStore
 
-APP_VERSION = "1.5.0"
+APP_VERSION = "1.5.3"  # keep in sync with pyproject.toml; also busts the browser cache of CSS/JS
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 RISK_LEVELS = ("low", "medium", "high", "very_high")

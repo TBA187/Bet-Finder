@@ -114,7 +114,7 @@ class TheOddsApiProvider:
                     return
                 for ev in events:
                     try:
-                        n = self._ingest(ev, comp, now)
+                        n = self._ingest(ev, comp, sport_key, now)
                     except Exception as exc:  # one malformed event must not stop the refresh
                         log.warning("Skipping event %s: %s", ev.get("id") if isinstance(ev, dict) else "?", exc)
                         continue
@@ -142,13 +142,15 @@ class TheOddsApiProvider:
             return False
 
     # ------------------------------------------------------------------
-    def _ingest(self, ev: dict, comp: dict, now: datetime) -> Optional[int]:
+    def _ingest(self, ev: dict, comp: dict, sport_key: str, now: datetime) -> Optional[int]:
         home, away = ev["home_team"], ev["away_team"]
         kickoff = _parse_time(ev["commence_time"])
         if kickoff is None or kickoff <= now:
             return None  # BetFinder is pre-match only
+        # the exact sport key (e.g. tennis_atp_paris for the pattern tennis_atp_*) is needed to fetch results
         candidate = Fixture(id="", sport=comp["sport"], competition_id=comp["id"], competition_name=comp["name"],
-                            home=home, away=away, kickoff=kickoff)
+                            home=home, away=away, kickoff=kickoff,
+                            league_refs={NAME: {"sport_key": str(ev.get("sport_key") or sport_key)}})
         fx, swapped = self.repo.merge_fixture(candidate, NAME, str(ev["id"]))
         chosen: dict[tuple[str, str], int] = {}
         quotes: list[Quote] = []
@@ -218,23 +220,25 @@ class TheOddsApiProvider:
         return out
 
     async def _scores(self, cc: CachedClient, competitions: list[dict], now: datetime, summary: dict) -> int:
-        """Fetch results only for competitions that have unsettled past fixtures (saves credits)."""
-        pending = {}
-        for fx in self.repo.fixtures(include_demo=False):
-            if fx.refs.get(NAME) and fx.status in ("scheduled", "live") and now - timedelta(days=3) < fx.kickoff < now - timedelta(hours=2):
-                pending.setdefault(fx.competition_id, []).append(fx)
-        settled = 0
-        for comp in competitions:
-            sport_key = comp.get("providers", {}).get("the_odds_api")
-            if not sport_key or comp["id"] not in pending:
+        """Fetch results only for sport keys that have unsettled past fixtures (saves credits)."""
+        patterns = {c["id"]: c.get("providers", {}).get("the_odds_api") for c in competitions}
+        pending: dict[str, list[Fixture]] = {}
+        for fx in self.repo.fixtures():
+            if not (fx.refs.get(NAME) and fx.competition_id in patterns and fx.status in ("scheduled", "live")
+                    and now - timedelta(days=3) < fx.kickoff < now - timedelta(hours=2)):
                 continue
+            sport_key = (fx.league_refs.get(NAME) or {}).get("sport_key") or patterns[fx.competition_id]
+            if sport_key and "*" not in sport_key:  # a wildcard pattern is not a real sport key
+                pending.setdefault(sport_key, []).append(fx)
+        settled = 0
+        for sport_key, fixtures in pending.items():
             try:
                 data = await cc.get_json(f"{BASE}/sports/{sport_key}/scores",
                                          params={"apiKey": self.key, "daysFrom": 3, "dateFormat": "iso"}, ttl_seconds=1800)
             except ProviderError as exc:
-                summary["errors"].append(f"{comp['name']} scores: {exc}")
+                summary["errors"].append(f"{sport_key} scores: {exc}")
                 continue
-            by_ref = {fx.refs[NAME]: fx for fx in pending[comp["id"]]}
+            by_ref = {fx.refs[NAME]: fx for fx in fixtures}
             for ev in data if isinstance(data, list) else []:
                 fx = by_ref.get(str(ev.get("id")))
                 if not fx or not ev.get("completed") or not ev.get("scores"):

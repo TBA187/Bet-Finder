@@ -83,10 +83,6 @@ def is_whole_line(line: float | None) -> bool:
     return line is not None and abs(line - round(line)) < 1e-9
 
 
-def score_word(sport: str, lang: str = "en") -> str:
-    return unit(sport, lang)
-
-
 _LABELS = {
     "h2h_draw": ("Match result 1X2", "Kampresultat 1X2"),
     "h2h_ot": ("Moneyline (incl. overtime)", "Vinder (inkl. forlænget spilletid)"),

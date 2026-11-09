@@ -2,9 +2,9 @@
 odds, data/credit usage and a The Odds API credit planner."""
 from __future__ import annotations
 
-from datetime import datetime, timedelta
-from typing import Optional
+from datetime import datetime
 
+from app.providers.oddspapi import FREE_LIMIT as ODDSPAPI_FREE_LIMIT
 from app.services.analysis import AGENT_ORDER
 
 
@@ -139,8 +139,8 @@ def usage(provider_status: dict, settings: dict, providers: list, secret_source,
         elif p.name == "oddspapi":
             used = st.get("requests_by_month", {}).get(month, 0)
             budget = int(settings.get("oddspapi_monthly_budget", 240))
-            tokens = {"unit": "requests", "period": "month", "used": used, "remaining": max(0, 250 - used),
-                      "limit": 250, "budget": budget, "exact": False}
+            tokens = {"unit": "requests", "period": "month", "used": used, "remaining": max(0, ODDSPAPI_FREE_LIMIT - used),
+                      "limit": ODDSPAPI_FREE_LIMIT, "budget": budget, "exact": False}
         elif p.name == "odds_api_io":
             tokens = {"note": "paid_rate_limit"}  # no monthly cap; the provider does not report usage
         err, ok_at, err_at = st.get("last_error") or "", st.get("last_ok") or "", st.get("last_error_at") or ""
