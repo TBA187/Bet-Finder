@@ -15,7 +15,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from app.core.odds_math import DEVIG_METHODS
 from app.storage.json_store import JsonStore
 
-APP_VERSION = "1.4.0"
+APP_VERSION = "1.5.0"
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 RISK_LEVELS = ("low", "medium", "high", "very_high")
@@ -53,7 +53,10 @@ _SPEC: dict[str, tuple[Any, dict]] = {
     "suspicious_ev_pct": (20.0, {"type": float, "min": 5.0, "max": 200.0}),
     "stale_minutes": (240, {"type": int, "min": 10, "max": 10080}),
     # Daily picks
-    "coupon_min_odds": (3.0, {"type": float, "min": 1.5, "max": 50.0}),
+    # "auto" = smart: safe, value and bigger-odds coupons, no fixed minimum.
+    # "fixed" = every coupon above coupon_min_odds.
+    "coupon_odds_mode": ("auto", {"type": str, "choices": ("auto", "fixed")}),
+    "coupon_min_odds": (3.0, {"type": float, "min": 1.1, "max": 50.0}),
     "coupon_max_legs": (3, {"type": int, "min": 1, "max": 3}),
     "max_coupons": (3, {"type": int, "min": 1, "max": 5}),
     # Price deviation traffic light (price vs margin-free fair odds)

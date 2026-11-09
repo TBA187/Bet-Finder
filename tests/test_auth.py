@@ -209,3 +209,13 @@ def test_each_account_has_its_own_tracker(app):
     assert admin.get("/api/tracker").json()["summary"]["tracked"] == 0
     assert admin.delete(f"/api/tracker/{item['id']}").status_code == 404  # not theirs
     assert user.delete(f"/api/tracker/{item['id']}").status_code == 200
+
+
+def test_language_and_theme_are_saved_per_account(app):
+    admin = signed_in(app)
+    assert admin.get("/api/auth/me").json()["theme"] == "dark"  # dark is the default
+    r = admin.put("/api/account", json={"theme": "light", "language": "da"}).json()
+    assert r["theme"] == "light" and r["language"] == "da"
+    again = signed_in(app).get("/api/auth/me").json()  # a new sign-in remembers both
+    assert again["theme"] == "light" and again["language"] == "da"
+    assert admin.put("/api/account", json={"theme": "pink"}).status_code == 422

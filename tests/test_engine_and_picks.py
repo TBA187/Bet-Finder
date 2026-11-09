@@ -104,7 +104,7 @@ def _fake_analysis(fid, kickoff, ev, prob, odds, conf=70, risk="low", qualifies=
 def test_daily_picks_rules(settings):
     ko = NOW + timedelta(hours=3)
     analyses = [_fake_analysis(i, ko, ev=6 + i, prob=0.55, odds=1.95) for i in range(7)]
-    d = build_daily_picks(analyses, settings, NOW)
+    d = build_daily_picks(analyses, {**settings, "coupon_odds_mode": "fixed"}, NOW)
     assert 1 <= len(d["coupons"]) <= 3 and d["message"] is None
     seen = set()
     for c in d["coupons"]:
@@ -126,7 +126,7 @@ def test_daily_picks_never_forced(settings):
     assert build_daily_picks(bad, settings, NOW)["coupons"] == []
     # exactly one good opportunity with odds above 3 -> exactly one coupon
     one = [_fake_analysis(1, ko, ev=8, prob=0.36, odds=3.0 * 1.0 + 0.2)]
-    d = build_daily_picks(one, settings, NOW)
+    d = build_daily_picks(one, {**settings, "coupon_odds_mode": "fixed"}, NOW)
     assert len(d["coupons"]) == 1 and len(d["coupons"][0]["legs"]) == 1
     # high odds but low probability -> rejected even with positive EV
     longshot = [_fake_analysis(2, ko, ev=10, prob=0.11, odds=10.0)]
@@ -138,3 +138,36 @@ def test_matches_outside_window_are_ignored(settings):
     far = NOW + timedelta(days=3)
     d = build_daily_picks([_fake_analysis(i, far, ev=9, prob=0.5, odds=2.2) for i in range(4)], settings, NOW)
     assert d["coupons"] == [] and d["diagnostics"]["matches_in_window"] == 0
+
+
+def test_auto_mode_builds_safe_value_and_bigger_odds_coupons(settings):
+    ko = NOW + timedelta(hours=3)
+    analyses = [_fake_analysis(i, ko, ev=4 + i, prob=0.58, odds=1.80 + i * 0.01) for i in range(8)]
+    d = build_daily_picks(analyses, settings, NOW)  # auto is the default
+    assert d["criteria"]["coupon_odds_mode"] == "auto"
+    profiles = [c["profile"] for c in d["coupons"]]
+    assert profiles[0] == "safe" and "big" in profiles
+    safe = d["coupons"][0]
+    assert safe["combined_odds"] < 3.0 and safe["combined_ev_pct"] > 0  # not hidden for being under 3.00
+    big = next(c for c in d["coupons"] if c["profile"] == "big")
+    assert big["combined_odds"] >= 3.0
+    seen = set()
+    for c in d["coupons"]:
+        ids = {leg["fixture_id"] for leg in c["legs"]}
+        assert not (ids & seen)
+        seen |= ids
+
+
+def test_auto_mode_uses_strong_candidates_but_never_negative_value(settings):
+    ko = NOW + timedelta(hours=3)
+    strong = _fake_analysis(1, ko, ev=1.5, prob=0.72, odds=1.41, conf=80, risk="low", qualifies=False)
+    strong["selections"][0]["rejection_codes"] = ["ev"]   # only the EV threshold failed
+    weak = _fake_analysis(2, ko, ev=1.5, prob=0.50, odds=2.03, conf=80, risk="low", qualifies=False)
+    weak["selections"][0]["rejection_codes"] = ["ev"]     # not likely enough to be "strong"
+    negative = _fake_analysis(3, ko, ev=-1, prob=0.75, odds=1.30, qualifies=False)
+    d = build_daily_picks([strong, weak, negative], settings, NOW)
+    legs = [leg for c in d["coupons"] for leg in c["legs"]]
+    assert [leg["fixture_id"] for leg in legs] == [1] and legs[0]["tier"] == "strong"
+    assert d["coupons"][0]["combined_odds"] < 2.0
+    fixed = build_daily_picks([strong, weak, negative], {**settings, "coupon_odds_mode": "fixed"}, NOW)
+    assert fixed["coupons"] == []  # fixed mode keeps the strict rules

@@ -140,8 +140,8 @@ const builder = {
 function applyLanguage() {
   document.documentElement.lang = state.lang;
   $$(".topnav a").forEach((a) => { const sp = a.querySelector("span"); if (sp) sp.textContent = t(`nav_${a.dataset.tab}`); });
-  $("#langBtn").textContent = state.lang === "da" ? "EN" : "DA";
-  $("#langBtn").title = t("language");
+  renderToggles();
+  renderSidebar();
   $("#userBtn").title = t("more_account");
   $("#userBtn").setAttribute("aria-label", t("more_account"));
 }
@@ -154,7 +154,7 @@ function applyRole() {
   $("#refreshBtn").hidden = !can("refresh");
   const ub = $("#userBtn");
   if (signed) {
-    ub.textContent = initials(state.user);
+    if (!ub.querySelector("svg")) ub.innerHTML = ICONS.account;
     const n = can("admin") ? state.user.pending_requests || 0 : 0;
     ub.dataset.badge = n ? String(n) : "";
   }
@@ -162,6 +162,7 @@ function applyRole() {
 
 async function startApp() {
   if (state.user && state.user.language && state.user.language !== state.lang) { state.lang = state.user.language; store.set("bf_lang", state.lang); }
+  if (state.user && state.user.theme && state.user.theme !== currentTheme()) applyTheme(state.user.theme);
   applyLanguage(); applyRole();
   if (!state.catalog || !Object.keys(state.catalog.sports || {}).length) {
     try { state.catalog = await api("/api/catalog"); } catch (_) { state.catalog = { categories: {}, sports: {} }; }
@@ -257,23 +258,23 @@ function renderHome(d) {
       ${tile(t("t_matches"), c.with_odds, "#scanner")}${tile(t("t_value"), c.value_bets, "#scanner", c.value_bets ? "pos" : "")}
       ${tile(t("t_errors"), c.pricing_errors, "#scanner", c.pricing_errors ? "neg-red" : "")}${tile(t("t_arbs"), c.arbitrage, "#arbitrage")}
     </div>
-    <div class="section-title spread"><span>${esc(t("sec_coupons"))}</span><a class="small" href="#picks">${esc(t("open_picks"))}</a></div>
+    <div class="section-title spread" id="sec-coupons"><span>${esc(t("sec_coupons"))}</span><a class="small" href="#picks">${esc(t("open_picks"))}</a></div>
     ${d.picks.coupons.length ? `<div class="grid-coupons">${d.picks.coupons.map((cp) => `<a class="card coupon-mini" href="#picks">
         <div class="spread"><b>${esc(cp.title)}</b>${riskChip(cp.risk_rating)}</div>
         <div class="row" style="margin-top:6px"><span class="big odds">${fmtOdds(cp.combined_odds)}</span><span class="pos small">${fmtEv(cp.combined_ev_pct)}</span>
         <span class="small muted">${esc(t("c_legs", { n: cp.legs }))}</span></div></a>`).join("")}</div>`
       : `<div class="empty small">${esc(d.picks.message || "")}</div>`}
-    <div class="section-title">${esc(t("sec_top_value"))}</div>
+    <div class="section-title" id="sec-value">${esc(t("sec_top_value"))}</div>
     ${d.top_value.length ? d.top_value.map(briefCard).join("") : `<div class="empty small">${esc(t("none_value"))}</div>`}
-    <div class="section-title">${esc(t("sec_errors"))}</div>
+    <div class="section-title" id="sec-errors">${esc(t("sec_errors"))}</div>
     ${d.pricing_errors.length ? d.pricing_errors.map(briefCard).join("") : `<div class="empty small">${esc(t("none_errors"))}</div>`}
-    <div class="section-title">${esc(t("sec_drops"))}</div>
+    <div class="section-title" id="sec-drops">${esc(t("sec_drops"))}</div>
     ${d.dropping.length ? `<div class="card">${d.dropping.map((x) => `<div class="list-row click-row" data-action="openMatch" data-id="${esc(x.fixture.id)}">
         <div style="min-width:0"><b>${esc(x.label)}</b> <span class="small muted">· ${esc(x.fixture.home)} vs ${esc(x.fixture.away)}</span>
         <div class="tiny muted">${esc(x.bookmaker)}${x.sharp ? " · sharp" : ""}</div></div>
         <div class="odds small" style="text-align:right">${fmtOdds(x.from)} → <b>${fmtOdds(x.to)}</b><div class="${x.move_pct < 0 ? "pos" : "neg"} tiny">${fmtEv(x.move_pct)}</div></div></div>`).join("")}</div>`
       : `<div class="empty small">${esc(t("none_drops"))}</div>`}
-    <div class="section-title spread"><span>${esc(t("sec_tracker"))}</span><a class="small" href="#tracker">${esc(t("see_all"))}</a></div>
+    <div class="section-title spread" id="sec-performance"><span>${esc(t("sec_tracker"))}</span><a class="small" href="#tracker">${esc(t("see_all"))}</a></div>
     <div class="tiles">${tile(t("tr_tracked"), tr.tracked, "#tracker")}${tile(t("tr_roi"), tr.roi_pct != null ? fmtEv(tr.roi_pct) : "–", "#tracker", evClass(tr.roi_pct))}
       ${tile(t("tr_avg_clv"), fmtEv(tr.avg_clv_pct), "#tracker", evClass(tr.avg_clv_pct))}${tile(t("tr_beat"), tr.clv_beat_rate_pct != null ? tr.clv_beat_rate_pct + "%" : "–", "#tracker")}</div>
     <div class="footer-note">${esc(t("disclaimer"))}</div>`;
@@ -515,10 +516,18 @@ function teamNewsSection(a, started) {
 }
 
 // --------------------------------------------------------------- daily picks
+function picksQuery() {
+  const mode = store.get("bf_picks_mode", null), min = store.get("bf_picks_min", null);
+  const q = new URLSearchParams();
+  if (mode) q.set("mode", mode);
+  if (mode === "fixed" && min) q.set("min_odds", min);
+  return q.toString() ? `?${q}` : "";
+}
+
 async function viewPicks(token) {
   view.innerHTML = head(t("picks_title")) + skeleton(2);
   try {
-    const d = await api("/api/daily-picks");
+    const d = await api(`/api/daily-picks${picksQuery()}`);
     if (token !== state.routeToken) return;
     view.innerHTML = renderPicks(d);
   } catch (err) { view.innerHTML += errorBox(err); }
@@ -536,14 +545,19 @@ function renderPicks(d) {
     body = d.coupons.map(couponCard).join("");
     if (d.coupons.length < c.max_coupons) body += `<div class="small muted" style="margin-top:10px">${esc(t("picks_fewer", { n: d.coupons.length }))}</div>`;
   }
-  const singles = d.singles.length ? `<div class="section-title">${esc(t("picks_singles"))}</div><div class="card sel-list">${d.singles.map((l) => `
+  const singles = d.singles.length ? `<div class="section-title" id="sec-singles">${esc(t("picks_singles"))}</div><div class="card sel-list">${d.singles.map((l) => `
     <div class="sel-row click-row" data-action="openMatch" data-id="${esc(l.fixture_id)}"><div><div class="name">${esc(l.selection_label)}</div><div class="small muted">${esc(l.match)} · ${esc(l.market_label)}</div></div>
     <div class="pos" style="font-weight:750">${fmtEv(l.ev_pct)}</div><div class="facts"><span><b class="odds">${fmtOdds(l.odds)}</b> ${esc(l.bookmaker_name)}</span><span>p <b>${fmtPct(l.probability)}</b></span><span>${esc(t("fair"))} <b>${fmtOdds(l.fair_odds)}</b></span>${riskChip(l.risk_rating)}</div></div>`).join("")}</div>` : "";
-  return head(t("picks_title"), esc(t("picks_sub", { n: c.max_coupons })) + "<br>" + esc(t("picks_window", { w: `${fmtTime(d.window.from)} → ${fmtTime(d.window.to)}` }))) + body + singles + `
-    <div class="section-title">${esc(t("criteria"))}</div><div class="card small"><dl class="kv">
+  const auto = c.coupon_odds_mode !== "fixed";
+  const modeBar = `<div class="card picks-mode"><div class="row wrap"><b class="small">${esc(t("cr_coupon"))}</b>
+      <div class="seg"><button type="button" data-action="picksMode" data-v="auto" class="${auto ? "on" : ""}">${esc(t("pm_auto"))}</button><button type="button" data-action="picksMode" data-v="fixed" class="${auto ? "" : "on"}">${esc(t("pm_fixed"))}</button></div>
+      ${auto ? "" : `<label class="small muted" for="pmMin">${esc(t("pm_min"))}</label><input class="input" id="pmMin" type="number" min="1.1" max="50" step="0.1" value="${Number(c.coupon_min_odds).toFixed(2)}" style="max-width:96px" data-change="picksMin">`}</div>
+    <div class="tiny muted" style="margin-top:6px">${esc(t(auto ? "pm_auto_d" : "pm_fixed_d", { o: Number(c.coupon_min_odds).toFixed(2) }))}</div></div>`;
+  return head(t("picks_title"), esc(t("picks_sub", { n: c.max_coupons })) + "<br>" + esc(t("picks_window", { w: `${fmtTime(d.window.from)} → ${fmtTime(d.window.to)}` }))) + modeBar + `<div id="sec-coupons"></div>` + body + singles + `
+    <div class="section-title" id="sec-criteria">${esc(t("criteria"))}</div><div class="card small"><dl class="kv">
       <dt>${esc(t("cr_ev"))}</dt><dd>${c.min_ev_pct}%</dd><dt>${esc(t("cr_edge"))}</dt><dd>≥ ${c.min_market_edge_pct}%</dd>
       <dt>${esc(t("cr_conf"))}</dt><dd>${c.min_confidence}</dd><dt>${esc(t("cr_risk"))}</dt><dd>${esc(t(`risk_${c.max_risk}`))}</dd>
-      <dt>${esc(t("cr_prob"))}</dt><dd>${fmtPct(c.min_leg_probability, 0)}</dd><dt>${esc(t("cr_coupon"))}</dt><dd>&gt; ${Number(c.coupon_min_odds).toFixed(2)}, ≤ ${c.coupon_max_legs}</dd>
+      <dt>${esc(t("cr_prob"))}</dt><dd>${fmtPct(c.min_leg_probability, 0)}</dd><dt>${esc(t("cr_coupon"))}</dt><dd>${c.coupon_odds_mode === "fixed" ? `&gt; ${Number(c.coupon_min_odds).toFixed(2)}` : esc(t("pm_auto"))}, ≤ ${c.coupon_max_legs} ${esc(t("cr_legs"))}</dd>
       <dt>${esc(t("cr_books"))}</dt><dd>${c.my_bookmakers.length ? esc(c.my_bookmakers.join(", ")) : esc(t("all"))}</dd></dl>
       <div style="margin-top:10px"><a href="#sources">${esc(t("change_criteria"))}</a></div></div>
     <div class="footer-note">${t("picks_footer")}</div>`;
@@ -551,7 +565,7 @@ function renderPicks(d) {
 
 function couponCard(cp) {
   const legs = cp.legs.map((l) => `<div class="leg"><div class="lt"><div><div class="match">${esc(l.match)}</div><div class="small muted">${sportIcon(l.sport)} ${esc(sportLabel(l.sport))} · ${esc(l.competition)} · ${fmtTime(l.kickoff)}</div></div>${riskChip(l.risk_rating)}</div>
-    <div style="margin-top:6px"><b>${esc(l.selection_label)}</b> <span class="muted small">· ${esc(l.market_label)}</span> ${devChip(l.deviation_level)} ${srcChip(sourceKind(l.source))}</div>
+    <div style="margin-top:6px"><b>${esc(l.selection_label)}</b> <span class="muted small">· ${esc(l.market_label)}</span> ${l.tier === "strong" ? chip("blue", t("tier_strong")) : ""} ${devChip(l.deviation_level)} ${srcChip(sourceKind(l.source))}</div>
     <div class="facts"><div class="fact"><div class="k">${esc(t("l_odds"))}</div><div class="v odds">${fmtOdds(l.odds)}</div></div>
       <div class="fact"><div class="k">${esc(t("l_book"))}</div><div class="v" style="font-size:0.8rem">${esc(l.bookmaker_name)}</div></div>
       <div class="fact"><div class="k">${esc(t("l_prob"))}</div><div class="v">${fmtPct(l.probability)}</div></div>
@@ -559,8 +573,11 @@ function couponCard(cp) {
       <div class="fact"><div class="k">${esc(t("l_value"))}</div><div class="v pos">${fmtEv(l.ev_pct)}</div></div>
       <div class="fact"><div class="k">${esc(t("l_conf"))}</div><div class="v">${l.confidence}</div></div></div>
     <div class="small muted">${esc(l.explanation)}</div><a class="small" href="#match/${encodeURIComponent(l.fixture_id)}">${esc(t("full_analysis"))}</a></div>`).join("");
+  const PROF = { safe: ["green", "pf_safe_d"], value: ["blue", "pf_value_d"], big: ["violet", "pf_big_d"] };
+  const prof = PROF[cp.profile];
   return `<div class="card coupon"><div class="coupon-head"><div><h2 style="font-size:1.1rem">${esc(cp.title)} ${cp.is_demo ? chip("violet", t("demo")) : ""}</h2>
-      <div class="small muted">${esc(t("c_legs", { n: cp.legs.length }))} · ${riskChip(cp.risk_rating)}</div></div>
+      <div class="small muted">${esc(t("c_legs", { n: cp.legs.length }))} · ${riskChip(cp.risk_rating)}</div>
+      ${prof ? `<div class="tiny muted" style="margin-top:3px">${esc(t(prof[1]))}</div>` : ""}</div>
       <div class="coupon-total"><div class="big odds">${fmtOdds(cp.combined_odds)}</div><div class="tiny muted">${esc(t("c_combined"))}</div></div></div>
     <div class="grid-3" style="margin-bottom:6px"><div class="fact"><div class="k">${esc(t("c_winprob"))}</div><div class="v">${fmtPct(cp.combined_probability)}</div></div>
       <div class="fact"><div class="k">${esc(t("c_fair"))}</div><div class="v odds">${fmtOdds(cp.combined_fair_odds)}</div></div>
@@ -732,7 +749,7 @@ function viewMore() {
     (can("usage") ? item("#usage", "more_usage", "more_usage_d", "📊") : "") +
     (can("admin") ? item("#sources", "more_sources", "more_sources_d", "⚙") + item("#users", "more_users", "more_users_d", "👥", pending) : "") +
     item("#account", "more_account", "more_account_d", "👤") +
-    `<div class="card spread" style="margin-top:10px"><b>${esc(t("language"))}</b><div class="seg"><button data-action="setLang" data-v="en" class="${state.lang === "en" ? "on" : ""}">English</button><button data-action="setLang" data-v="da" class="${state.lang === "da" ? "on" : ""}">Dansk</button></div></div>
+    `<div class="card spread" style="margin-top:10px"><b>${esc(t("language"))}</b><div class="seg"><button data-action="setLang" data-v="en" class="${state.lang === "en" ? "on" : ""}">${flag("en")} English</button><button data-action="setLang" data-v="da" class="${state.lang === "da" ? "on" : ""}">${flag("da")} Dansk</button></div></div>
     <button class="btn ghost block" type="button" data-action="signOut" style="margin-top:12px">${esc(t("ac_sign_out"))} (${esc(state.user.username)})</button>`;
 }
 
@@ -826,11 +843,11 @@ function renderTracker(d) {
           : it.manual_result ? `<button class="btn ghost small" data-action="settle" data-id="${esc(it.id)}" data-v="pending">${esc(t("tr_reopen"))}</button>` : ""}
         <button class="btn danger small" data-action="delTracked" data-id="${esc(it.id)}">${esc(t("tr_delete"))}</button></div></div>`;
   }).join("");
-  return head(t("tr_title"), esc(t("tr_sub"))) + `<div class="tiles">
+  return head(t("tr_title"), esc(t("tr_sub"))) + `<div class="tiles" id="sec-summary">
     ${tile("tr_tracked", s.tracked)}${tile("tr_settled", s.settled)}${tile("tr_hit", s.hit_rate_pct != null ? s.hit_rate_pct + "%" : "–")}${tile("tr_roi", s.roi_pct != null ? fmtEv(s.roi_pct) : "–", evClass(s.roi_pct))}
     ${tile("tr_avg_ev", fmtEv(s.avg_ev_pct), evClass(s.avg_ev_pct))}${tile("tr_avg_clv", fmtEv(s.avg_clv_pct), evClass(s.avg_clv_pct))}
     ${tile("tr_beat", s.clv_beat_rate_pct != null ? s.clv_beat_rate_pct + "%" : "–")}${tile("tr_profit", s.profit, evClass(s.profit))}</div>
-    <div class="section-title">${esc(t("tr_history"))}</div>${items || `<div class="empty"><div class="big">${esc(t("tr_empty"))}</div>${esc(t("tr_empty_sub"))}</div>`}`;
+    <div class="section-title" id="sec-history">${esc(t("tr_history"))}</div>${items || `<div class="empty"><div class="big">${esc(t("tr_empty"))}</div>${esc(t("tr_empty_sub"))}</div>`}`;
 }
 
 // --------------------------------------------------------------------- usage
@@ -870,9 +887,9 @@ function renderUsage(u, plan, st) {
     ${Object.keys(p.blocked_hosts || {}).length ? `<div class="small" style="margin-top:6px;color:var(--orange)">${esc(t("u_blocked"))}: ${Object.entries(p.blocked_hosts).map(([h, b]) => `${esc(h)} (${esc(b.reason || "")})`).join(", ")}</div>` : ""}</div>`).join("");
   const price = plan.price_usd ? t("per_month", { p: plan.price_usd }) : t("free");
   return head(t("u_title"), esc(t("u_sub"))) + `<div class="card spread"><span>${esc(t("u_method_now"))}</span>${chip(nowCls, now)}</div>
-    <div class="section-title">${esc(t("u_chain"))}</div><div class="card">${chain || `<span class="small muted">${esc(t("never"))}</span>`}</div>
-    <div class="section-title">${esc(t("s_providers"))}</div>${rows}
-    <div class="section-title">${esc(t("u_planner"))}</div><div class="card small">${t("u_plan_line", { c: plan.credits_per_refresh, r: plan.refreshes_per_day, m: plan.monthly_credits })}
+    <div class="section-title" id="sec-chain">${esc(t("u_chain"))}</div><div class="card">${chain || `<span class="small muted">${esc(t("never"))}</span>`}</div>
+    <div class="section-title" id="sec-providers">${esc(t("s_providers"))}</div>${rows}
+    <div class="section-title" id="sec-planner">${esc(t("u_planner"))}</div><div class="card small">${t("u_plan_line", { c: plan.credits_per_refresh, r: plan.refreshes_per_day, m: plan.monthly_credits })}
       <div style="margin-top:6px">${t("u_plan_rec", { p: esc(plan.recommended_plan), price: esc(price) })}</div><div class="tiny faint" style="margin-top:4px">${esc(plan.assumption)}</div></div>`;
 }
 
@@ -946,14 +963,14 @@ function renderSources(status, settings, books, comps) {
   const tg = settings.notify_telegram_token;
   const plan = comps.credit_plan;
   return head(t("s_title"), esc(t("s_sub"))) + `
-  <div class="section-title">${esc(t("s_providers"))}</div>${status.providers.map((p) => providerCard(p, settings)).join("")}
+  <div class="section-title" id="sec-providers">${esc(t("s_providers"))}</div>${status.providers.map((p) => providerCard(p, settings)).join("")}
   <div class="card"><div class="spread"><b>${esc(t("s_manual"))}</b>${chip("green", t("s_always"))}</div><div class="small muted" style="margin-top:4px">${t("s_manual_d")}</div></div>
-  <div class="section-title">${esc(t("s_odds_opts"))}</div>
+  <div class="section-title" id="sec-oddsopts">${esc(t("s_odds_opts"))}</div>
   <form class="card" data-submit="saveOddsApi"><div class="small muted">${t("s_cost", { c: plan.credits_per_refresh })} <a href="#usage">${esc(t("u_planner"))} ›</a></div>
     <div class="row wrap" style="margin-top:10px"><span class="small" style="width:70px">${esc(t("s_regions"))}</span>${["eu", "uk", "se", "fr"].map((r) => `<label class="switch small"><input type="checkbox" name="odds_api_regions" value="${r}" ${settings.odds_api_regions.includes(r) ? "checked" : ""}><span>${r.toUpperCase()}</span></label>`).join(" ")}</div>
     <div class="row wrap" style="margin-top:8px"><span class="small" style="width:70px">${esc(t("s_markets"))}</span>${["h2h", "totals", "spreads"].map((m) => `<label class="switch small"><input type="checkbox" name="odds_api_markets" value="${m}" ${settings.odds_api_markets.includes(m) ? "checked" : ""}><span>${m}</span></label>`).join(" ")}</div>
     <button class="btn ghost small" type="submit" style="margin-top:10px">${esc(t("save"))}</button></form>
-  <div class="section-title">${esc(t("s_notify"))}</div>
+  <div class="section-title" id="sec-notify">${esc(t("s_notify"))}</div>
   <form class="card" data-submit="saveNotify"><div class="small muted">${esc(t("s_notify_d"))}</div>
     <div class="grid-2" style="margin-top:8px"><div class="field"><label class="f">${esc(t("s_tg_token"))}</label><input class="input" type="password" name="notify_telegram_token" autocomplete="off" placeholder="${tg.configured ? esc(t("s_saved_hint", { h: tg.hint })) : ""}"></div>
       <div class="field" style="margin-top:12px"><label class="f">${esc(t("s_tg_chat"))}</label><input class="input" name="notify_telegram_chat_id" value="${esc(settings.notify_telegram_chat_id)}"></div>
@@ -962,13 +979,15 @@ function renderSources(status, settings, books, comps) {
     <div class="row wrap" style="margin-top:10px">${sw("notify_on_errors", settings.notify_on_errors)}${sw("notify_on_value", settings.notify_on_value)}${sw("notify_on_picks", settings.notify_on_picks)}${sw("notify_on_arbitrage", settings.notify_on_arbitrage)}</div>
     <div class="field"><label class="f">${esc(t("s_n_min_ev"))}</label><input class="input" name="notify_min_ev_pct" type="number" step="0.5" value="${esc(settings.notify_min_ev_pct)}"></div>
     <div class="row" style="margin-top:10px"><button class="btn ghost small" type="submit">${esc(t("save"))}</button><button class="btn ghost small" type="button" data-action="notifyTest">${esc(t("s_n_test"))}</button></div></form>
-  <div class="section-title">${esc(t("s_books"))}</div><div class="card"><div class="small muted" style="margin-bottom:6px">${esc(t("s_books_d"))}</div>${bookRows}</div>
-  <div class="section-title">${esc(t("s_competitions"))}</div><div class="small muted" style="margin-bottom:8px">${esc(t("s_comp_d", { e: comps.items.filter((c) => c.enabled).length, t: comps.items.length }))}</div>${compBlocks}
-  <div class="section-title">${esc(t("s_analysis"))}</div>
+  <div class="section-title" id="sec-books">${esc(t("s_books"))}</div><div class="card"><div class="small muted" style="margin-bottom:6px">${esc(t("s_books_d"))}</div>${bookRows}</div>
+  <div class="section-title" id="sec-leagues">${esc(t("s_competitions"))}</div><div class="small muted" style="margin-bottom:8px">${esc(t("s_comp_d", { e: comps.items.filter((c) => c.enabled).length, t: comps.items.length }))}</div>${compBlocks}
+  <div class="section-title" id="sec-analysis">${esc(t("s_analysis"))}</div>
   <form class="card" data-submit="saveSettings">
     <div class="grid-2"><div class="field"><label class="f">${esc(t("s_lang"))}</label><select class="input" name="language"><option value="en" ${settings.language === "en" ? "selected" : ""}>English</option><option value="da" ${settings.language === "da" ? "selected" : ""}>Dansk</option></select></div>
       <div class="field" style="margin-top:12px"><label class="f">${esc(t("s_currency"))}</label><select class="input" name="currency">${["DKK", "EUR", "SEK", "NOK", "GBP", "USD"].map((c) => `<option ${settings.currency === c ? "selected" : ""}>${c}</option>`).join("")}</select></div></div>
     <div class="field"><label class="f">${esc(t("s_max_risk"))}</label><select class="input" name="max_risk">${["low", "medium", "high", "very_high"].map((r) => `<option value="${r}" ${settings.max_risk === r ? "selected" : ""}>${esc(t(`risk_${r}`))}</option>`).join("")}</select></div>
+    <div class="field"><label class="f">${esc(t("set_coupon_odds_mode"))}</label><select class="input" name="coupon_odds_mode">${["auto", "fixed"].map((m) => `<option value="${m}" ${settings.coupon_odds_mode === m ? "selected" : ""}>${esc(t(m === "auto" ? "pm_auto" : "pm_fixed"))}</option>`).join("")}</select>
+      <div class="tiny faint" style="margin-top:3px">${esc(t("set_coupon_odds_mode_h"))}</div></div>
     <div class="field"><label class="f">${esc(t("s_devig"))}</label><select class="input" name="devig_method">${[["shin", "Shin"], ["power", "Power"], ["multiplicative", "Proportional"], ["additive", "Additive"]].map(([v, l]) => `<option value="${v}" ${settings.devig_method === v ? "selected" : ""}>${l}</option>`).join("")}</select></div>
     <div class="field"><label class="f">${esc(t("s_tz"))}</label><input class="input" name="timezone" value="${esc(settings.timezone)}"></div>
     ${nums}<button class="btn block" type="submit" style="margin-top:14px">${esc(t("s_save"))}</button></form>
@@ -1003,6 +1022,7 @@ const actions = {
   builderRemove: (el) => { builder.remove(Number(el.dataset.i)); route(); },
   builderClear: () => { builder.clear(); route(); },
   builderCalc: () => builderCalc(null),
+  picksMode: (el) => { store.set("bf_picks_mode", el.dataset.v); route(); },
   fetchMore: async (el) => {
     el.disabled = true;
     try { const r = await api(`/api/fixtures/${encodeURIComponent(el.dataset.fid)}/fetch-more`, { method: "POST" }); toast(t("m_more_books_done", { n: r.quotes, b: r.budget_left }), 5000); route(); }
@@ -1043,6 +1063,7 @@ const actions = {
 };
 
 const changes = {
+  picksMin: (el) => { const v = parseFloat(el.value); if (v >= 1.1 && v <= 50) { store.set("bf_picks_min", v); route(); } },
   scanSort: (el) => { state.scanner.sort = el.value; route(); },
   scanDev: (el) => { state.scanner.min_deviation = el.value; route(); },
   arbStake: (el) => { store.set("bf_arb_stake", parseFloat(el.value) || 100); route(); },
@@ -1110,7 +1131,7 @@ const submits = {
   },
   saveSettings: async (form) => {
     const fd = new FormData(form), body = {};
-    for (const [k, v] of fd.entries()) body[k] = ["max_risk", "devig_method", "timezone", "language", "currency"].includes(k) ? v : Number(v);
+    for (const [k, v] of fd.entries()) body[k] = ["max_risk", "devig_method", "timezone", "language", "currency", "coupon_odds_mode"].includes(k) ? v : Number(v);
     await putSettings(body);  // "language" here is the default for notifications; each account picks its own
   },
 };
@@ -1122,11 +1143,11 @@ document.addEventListener("submit", (e) => { const f = e.target.closest("[data-s
 $("#refreshBtn").addEventListener("click", doRefresh);
 $("#sourcePill").addEventListener("click", () => { if (can("usage")) location.hash = "#usage"; });
 $("#userBtn").addEventListener("click", () => { location.hash = can("admin") && state.user.pending_requests ? "#users" : "#account"; });
-$("#langBtn").addEventListener("click", () => setLanguage(state.lang === "da" ? "en" : "da"));
+
 
 // -------------------------------------------------------------------- router
-const MORE_TABS = ["more", "agents", "arbitrage", "builder", "tracker", "usage", "sources", "account", "users"];
-const NEEDS = { add: "manual", usage: "usage", sources: "admin", users: "admin" };
+const MORE_TABS = ["more", "agents", "arbitrage", "builder", "tracker", "usage", "sources", "account", "users", "admin"];
+const NEEDS = { add: "manual", usage: "usage", sources: "admin", users: "admin", admin: "admin" };
 function route() {
   const hash = location.hash.replace(/^#/, "") || "home";
   const [tab, ...rest] = hash.split("/");
@@ -1136,18 +1157,29 @@ function route() {
   $$(".topnav a").forEach((a) => a.classList.toggle("on", a.dataset.tab === nav));
   const views = { home: viewHome, scanner: viewScanner, picks: viewPicks, add: viewAdd, more: viewMore, agents: viewAgents,
     arbitrage: viewArbitrage, builder: viewBuilder, tracker: viewTracker, usage: viewUsage, sources: viewSources,
-    account: viewAccount, users: viewUsers };
+    account: viewAccount, users: viewUsers, admin: viewAdmin };
+  renderSidebar();
   if (NEEDS[tab] && !can(NEEDS[tab])) {
     view.innerHTML = head(t("no_access_title")) + `<div class="empty">${esc(t("no_access"))}</div>`;
     return;
   }
+  let section = rest[0] || "";
+  if (tab === "scanner" && section) {  // shortcuts from the side menu
+    if (section === "all") Object.assign(state.scanner, { category: "", sport: "", value_only: false });
+    else if (section === "valueonly") state.scanner.value_only = true;
+    else if (section.startsWith("cat-")) Object.assign(state.scanner, { category: section.slice(4), sport: "" });
+    section = "";
+  }
+  if (tab === "users" && section) { usersState.tab = section; usersState.picked = true; section = ""; }
   if (tab === "match" && rest.length) viewMatch(token, decodeURIComponent(rest.join("/")));
   else (views[tab] || viewHome)(token);
-  if (!rest.length) window.scrollTo(0, 0);
+  if (section && tab !== "match") scrollToSection(section, token);
+  else if (!rest.length || tab !== "match") window.scrollTo(0, 0);
 }
 window.addEventListener("hashchange", route);
 
 (async function init() {
+  trackTopbar();
   applyLanguage();
   try { state.user = await api("/api/auth/me", { quiet: true }); } catch (_) { state.user = null; }
   if (state.user) await startApp();

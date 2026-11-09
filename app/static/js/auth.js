@@ -17,7 +17,7 @@ const can = (perm) => !!(state.user && state.user.permissions && state.user.perm
 function passwordWarning(u) {
   if (!u || !u.must_change_password) return "";
   const text = u.default_password ? t("pw_default_warn") : t("pw_temp_warn", { d: esc(fmtDate(u.temp_password_expires_at)) });
-  return `<div class="banner err"><div class="grow">${text} <a href="#account">${esc(t("pw_change_now"))}</a></div></div>`;
+  return `<div class="banner err"><div class="grow">${text} <a href="#account/password">${esc(t("pw_change_now"))}</a></div></div>`;
 }
 
 // ------------------------------------------------------------ sign-in page
@@ -26,6 +26,7 @@ const authState = { mode: "login", done: null };
 function renderLogin(mode) {
   if (mode) { authState.mode = mode; authState.done = null; }
   applyRole();
+  renderSidebar();
   $("#banner").innerHTML = "";
   const m = authState.mode;
   const field = (name, label, attrs = "", help = "") => `<div class="field"><label class="f" for="au_${name}">${esc(t(label))}</label>
@@ -65,7 +66,7 @@ function renderLogin(mode) {
   view.innerHTML = `<div class="auth-wrap"><div class="card auth-card">
       <div class="auth-brand"><svg viewBox="0 0 24 24" width="26" height="26" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5" fill="none" stroke="currentColor" stroke-width="2.2"/><path d="M15.5 15.5 21 21" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/><path d="M7.5 11.5l2 2 4-5" fill="none" stroke="var(--accent)" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span>BetFinder</span></div>
       ${body}</div>
-    <div class="seg auth-lang"><button type="button" data-action="setLang" data-v="en" class="${state.lang === "en" ? "on" : ""}">English</button><button type="button" data-action="setLang" data-v="da" class="${state.lang === "da" ? "on" : ""}">Dansk</button></div>
+    <div class="seg auth-lang"><button type="button" data-action="setLang" data-v="en" class="${state.lang === "en" ? "on" : ""}">${flag("en")} English</button><button type="button" data-action="setLang" data-v="da" class="${state.lang === "da" ? "on" : ""}">${flag("da")} Dansk</button></div>
     <div class="tiny faint auth-foot">${esc(t("au_foot"))}</div></div>`;
   const first = view.querySelector("input:not([type=checkbox]):not([tabindex='-1'])");
   if (first && window.matchMedia("(min-width: 700px)").matches) first.focus();
@@ -116,7 +117,7 @@ function renderAccount(u) {
     <div class="small muted" style="margin-top:8px">${esc(t(`role_${u.role}_d`))}</div>
     <dl class="kv" style="margin-top:10px"><dt>${esc(t("ac_last_login"))}</dt><dd>${esc(fmtDate(u.last_login_at))}</dd>
       <dt>${esc(t("ac_pw_changed_at"))}</dt><dd>${u.password_changed_at ? esc(fmtDate(u.password_changed_at)) : esc(t("never"))}</dd></dl></div>
-  <div class="section-title" id="pw">${esc(t("ac_password"))}</div>
+  <div class="section-title" id="sec-password">${esc(t("ac_password"))}</div>
   <form class="card ${u.must_change_password ? "attention" : ""}" data-submit="changePassword">
     ${u.must_change_password ? `<div class="small" style="color:var(--amber);margin-bottom:4px">${u.default_password ? t("pw_default_warn") : t("pw_temp_warn", { d: esc(fmtDate(u.temp_password_expires_at)) })}</div>` : ""}
     <input type="text" name="username" value="${esc(u.username)}" autocomplete="username" hidden>
@@ -125,14 +126,14 @@ function renderAccount(u) {
       <div class="field"><label class="f" for="ac_rep">${esc(t("ac_repeat"))}</label><input class="input" id="ac_rep" type="password" name="repeat" autocomplete="new-password" minlength="8" required></div></div>
     <div class="tiny faint" style="margin-top:6px">${esc(t("ac_pw_rules"))}</div>
     <button class="btn small" type="submit" style="margin-top:10px">${esc(t("ac_pw_button"))}</button></form>
-  <div class="section-title">${esc(t("ac_profile"))}</div>
+  <div class="section-title" id="sec-profile">${esc(t("ac_profile"))}</div>
   <form class="card" data-submit="saveProfile">
     <div class="grid-2">${f("name", "ac_name", u.name, 'autocomplete="name" maxlength="80"')}
       ${f("username", "ac_username", u.username, 'autocomplete="username" required minlength="3" maxlength="32" autocapitalize="none" spellcheck="false"')}
       ${f("email", "ac_email", u.email, 'type="email" autocomplete="email" maxlength="120"')}
       <div class="field"><label class="f" for="ac_language">${esc(t("ac_language"))}</label><select class="input" id="ac_language" name="language">${langOptions(u.language)}</select></div></div>
     <button class="btn ghost small" type="submit" style="margin-top:10px">${esc(t("save"))}</button></form>
-  <div class="section-title">${esc(t("ac_security"))}</div>
+  <div class="section-title" id="sec-security">${esc(t("ac_security"))}</div>
   <div class="card"><div class="small muted">${esc(t("ac_others_d"))}</div>
     <div class="row wrap" style="margin-top:10px"><button class="btn ghost small" type="button" data-action="signOutOthers">${esc(t("ac_sign_out_others"))}</button>
       <button class="btn danger small" type="button" data-action="signOut">${esc(t("ac_sign_out"))}</button></div></div>`;

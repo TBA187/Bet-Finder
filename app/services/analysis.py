@@ -335,6 +335,11 @@ class AnalysisService:
             # Combat/racket sports have no team-statistics agents; the estimate is market-based,
             # so data reliability mirrors market quality (plus any news entered).
             data = max(data, market / 40 * 30)
+        else:
+            # Without a statistics source the estimate is the margin-free consensus of many
+            # bookmakers: a deep market with sharp books is itself solid evidence.  Real team
+            # data can still add up to the full 35 points.
+            data = max(data, market / 40 * 20)
         agreement = 7.5 if disagreement is None else (1 - disagreement) * 15
         freshness = 0.0
         if main:

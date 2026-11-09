@@ -58,6 +58,7 @@ class ProfileIn(BaseModel):
     email: Optional[str] = Field(None, max_length=120)
     username: Optional[str] = Field(None, max_length=40)
     language: Optional[Literal["en", "da"]] = None
+    theme: Optional[Literal["dark", "light"]] = None
 
 
 class PasswordIn(BaseModel):

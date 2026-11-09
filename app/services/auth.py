@@ -174,7 +174,8 @@ def public_user(u: dict) -> dict:
     expires = u.get("temp_password_expires_at")
     return {
         "id": u["id"], "username": u["username"], "email": u.get("email", ""), "name": u.get("name", ""),
-        "role": u["role"], "language": u.get("language", "en"), "disabled": bool(u.get("disabled")),
+        "role": u["role"], "language": u.get("language", "en"), "theme": u.get("theme", "dark"),
+        "disabled": bool(u.get("disabled")),
         "must_change_password": bool(u.get("must_change_password")), "default_password": bool(u.get("default_password")),
         "temp_password_expires_at": expires, "created_at": u.get("created_at"), "created_by": u.get("created_by"),
         "last_login_at": u.get("last_login_at"), "password_changed_at": u.get("password_changed_at"),
@@ -297,6 +298,8 @@ class AuthService:
                 u["name"] = check_name(patch["name"])
             if "language" in patch and patch["language"] in ("en", "da"):
                 u["language"] = patch["language"]
+            if "theme" in patch and patch["theme"] in ("dark", "light"):
+                u["theme"] = patch["theme"]
             if "role" in patch and patch["role"] is not None and patch["role"] != u["role"]:
                 if patch["role"] not in ROLES:
                     raise AuthError("role_invalid", "Unknown role")
