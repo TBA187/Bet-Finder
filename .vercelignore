@@ -1,6 +1,7 @@
 .env
 .venv
 tests
+tools
 data/runtime
 .claude
 .pytest_cache

@@ -18,7 +18,7 @@ from typing import Optional
 from app.core.models import Quote, utcnow
 from app.services.registry import Registry
 from app.services.repository import Repository
-from app.services.scanner import compare_market, latest_quotes
+from app.services.scanner import compare_market, market_books
 from app.sports.settle import outcome, payout
 
 STATUS_FROM_OUTCOME = {"win": "won", "lose": "lost", "push": "void", "half_win": "half_won", "half_lose": "half_lost"}
@@ -154,9 +154,7 @@ class TrackerService:
 
     def _closing(self, leg: dict, kickoff: datetime, fx, settings: dict) -> Optional[dict]:
         snapshot = []
-        for q in self.repo.quotes(leg["fixture_id"]):
-            if q.market_id != leg["market_id"]:
-                continue
+        for q in self.repo.quotes(leg["fixture_id"]):  # every market: the result markets tell which rules a bookmaker uses
             past = [(t, o) for t, o in q.history if t <= kickoff]
             if not past:
                 continue
@@ -164,8 +162,9 @@ class TrackerService:
             snapshot.append(Quote(**{**q.model_dump(), "odds": o, "fetched_at": t, "book_updated_at": None, "history": []}))
         if not snapshot:
             return None
-        books = latest_quotes(snapshot).get(leg["market_id"], {})
-        comp = compare_market(fx, leg["market_id"], books, self.registry, {**settings, "stale_minutes": 10 ** 6}, kickoff)
+        books = market_books(fx, snapshot)[0].get(leg["market_id"], {})
+        comp = (compare_market(fx, leg["market_id"], books, self.registry, {**settings, "stale_minutes": 10 ** 6}, kickoff)
+                if books else None)
         out: dict = {}
         own = books.get(leg["bookmaker"], {}).get(leg["selection"])
         if own:

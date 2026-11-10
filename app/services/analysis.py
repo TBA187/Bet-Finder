@@ -18,6 +18,7 @@ Combination (per fixture):
 from __future__ import annotations
 
 import logging
+import math
 import threading
 from datetime import datetime
 from typing import Optional
@@ -364,8 +365,9 @@ class AnalysisService:
                 overall = views[0]
                 p = probs.get(s) if probs else None
                 pick = best or overall
-                ev = (p * pick["odds"] - 1) * 100 if p is not None else None
-                market_ev = (consensus[s] * pick["odds"] - 1) * 100 if consensus else None
+                price = pick.get("net_odds") or pick["odds"]  # exchange prices count after commission
+                ev = (p * price - 1) * 100 if p is not None else None
+                market_ev = (consensus[s] * price - 1) * 100 if consensus else None
                 conf = match_conf
                 n_books = comp["consensus"]["n_books"]
                 if n_books < 3:
@@ -377,7 +379,7 @@ class AnalysisService:
                 if best is None:
                     conf -= 20
                 conf = int(clamp(conf, 0, 100))
-                kelly_pct = kelly_fraction(p, pick["odds"]) * float(settings["kelly_fraction"]) * 100 if p else 0.0
+                kelly_pct = kelly_fraction(p, price) * float(settings["kelly_fraction"]) * 100 if p else 0.0
                 if ev is None or prob_source.get(mid) == "model-only" or n_books <= 1 or conf < 40:
                     value_status = "uncertain"
                 else:
@@ -390,7 +392,8 @@ class AnalysisService:
                     "market_id": mid, "market": comp["market"], "line": comp["line"], "market_label": comp["label"],
                     "selection": s,
                     "label": selection_label(fx.sport, comp["market"], comp["line"], s, fx.home, fx.away, lang),
-                    "best": {k: pick[k] for k in ("bookmaker", "name", "odds", "source", "flags", "age_min")},
+                    "best": {k: pick.get(k) for k in ("bookmaker", "name", "odds", "net_odds", "commission_pct", "source",
+                                                      "flags", "age_min")},
                     "best_is_allowed": best is not None,
                     "best_overall": {k: overall[k] for k in ("bookmaker", "name", "odds")},
                     "n_quotes": len(views),
@@ -401,6 +404,10 @@ class AnalysisService:
                     "fair_odds": round(1 / p, 3) if p else None,
                     "ev_pct": round(ev, 2) if ev is not None else None,
                     "market_ev_pct": round(market_ev, 2) if market_ev is not None else None,
+                    # the same price against the fair price of the OTHER ordinary bookmakers (None = too few to tell)
+                    "soft_ev_pct": pick.get("edge_vs_others_pct"),
+                    # how good the reference price is: strong | weak | None (no sharp bookmaker or liquid exchange)
+                    "anchor": comp["consensus"].get("anchor"),
                     "deviation_level": deviation,
                     "value_status": value_status,
                     "kelly_pct": round(kelly_pct, 2),
@@ -416,15 +423,33 @@ class AnalysisService:
     @staticmethod
     def _qualify(selections: list[dict], settings: dict, lang: str) -> None:
         max_risk = RISK_LEVELS.index(settings["max_risk"])
+        # A small edge is only trusted against a strong reference price (a sharp bookmaker or a
+        # liquid exchange); every other market needs the larger one.
+        base_ev = float(settings["min_ev_pct"])
+        weak_ev = max(base_ev, float(settings.get("min_ev_weak_anchor_pct", base_ev)))
+        soft_min = float(settings.get("min_soft_edge_pct", -100.0))
         for s in selections:
             reasons: list[tuple[str, str]] = []
+            required = base_ev if s.get("anchor") == "strong" else weak_ev
+            s["required_ev_pct"] = required
+            # the lowest price at which this selection still has the required edge
+            s["min_odds"] = None
+            if s.get("final_prob"):
+                need = (1 + required / 100) / s["final_prob"]
+                keep = 1 - float(s["best"].get("commission_pct") or 0.0) / 100  # exchanges: before commission
+                s["min_odds"] = math.ceil((1 + (need - 1) / keep) * 100 - 1e-9) / 100
             if s["ev_pct"] is None:
                 reasons.append(("no_probability", tr(lang, "rj_no_prob")))
-            elif s["ev_pct"] < float(settings["min_ev_pct"]):
-                reasons.append(("ev", tr(lang, "rj_ev", ev=f"{s['ev_pct']:+.1f}%", min=f"{settings['min_ev_pct']:g}")))
+            elif s["ev_pct"] < required:
+                reasons.append(("ev", tr(lang, "rj_ev", ev=f"{s['ev_pct']:+.1f}%", min=f"{required:g}")))
             min_edge = float(settings["min_market_edge_pct"])
             if s["market_ev_pct"] is not None and s["market_ev_pct"] < min_edge and min_edge > -100:
                 reasons.append(("edge", tr(lang, "rj_edge", e=f"{s['market_ev_pct']:+.1f}%", min=f"{min_edge:+.1f}%")))
+            # Safety net: value that rests on the reference price alone, with the price far below what
+            # the other bookmakers consider fair, usually means the reference is the one that is wrong.
+            if (soft_min > -100 and (s["ev_pct"] or 0) > 0 and s.get("soft_ev_pct") is not None
+                    and s["soft_ev_pct"] < soft_min):
+                reasons.append(("uncorroborated", tr(lang, "rj_uncorr", e=f"{s['soft_ev_pct']:+.1f}%", min=f"{soft_min:+.1f}%")))
             if s["confidence"] < int(settings["min_confidence"]):
                 reasons.append(("confidence", tr(lang, "rj_conf", c=s["confidence"], min=settings["min_confidence"])))
             if s.get("risk_rating") and RISK_LEVELS.index(s["risk_rating"]) > max_risk:
@@ -445,6 +470,8 @@ class AnalysisService:
             if s.get("dev_vs_median_pct") is not None and s["dev_vs_median_pct"] > 0:
                 text += tr(lang, "ex_above_median", pct=f"{s['dev_vs_median_pct']:.1f}")
             parts.append(text + ".")
+        if b.get("commission_pct") and b.get("net_odds"):
+            parts.append(tr(lang, "ex_commission", c=f"{b['commission_pct']:g}", net=f"{b['net_odds']:.2f}"))
         if s["final_prob"] is not None and s["market_prob"] is not None and abs(s["final_prob"] - s["market_prob"]) >= 0.005:
             parts.append(tr(lang, "ex_adjust", a=f"{s['market_prob']:.1%}", b=f"{s['final_prob']:.1%}"))
         elif s["prob_source"] == "model-only":

@@ -455,14 +455,18 @@ function marketTable(m, selections, open) {
       return `<td class="odds ${isBest ? "best" : ""} ${flagged ? "flagged" : ""}">${fmtOdds(o)}${q && q.edge_vs_fair_pct != null ? `<span class="sub">${fmtEv(q.edge_vs_fair_pct)}</span>` : ""}</td>`;
     }).join("");
     const dot = b.source.includes("manual") ? "manual" : b.source.includes("scraper") ? "scraped" : b.type;
-    return `<tr><td><span class="bk-name"><span class="dot ${esc(dot)}"></span>${esc(b.name)}</span><span class="sub tiny faint">${b.stale ? esc(t("stale")) + " · " : ""}${ago(b.age_min)}</span></td>${cells}
+    return `<tr${b.role === "ignored" ? ' style="opacity:0.5"' : ""}><td><span class="bk-name"><span class="dot ${esc(dot)}"></span>${esc(b.name)}</span><span class="sub tiny faint">${b.stale ? esc(t("stale")) + " · " : ""}${ago(b.age_min)}</span></td>${cells}
       <td class="faint">${b.margin_pct != null ? b.margin_pct.toFixed(1) + "%" : "–"}</td></tr>`;
   }).join("");
   const consRow = cons ? `<tr class="summary"><td>${esc(t("tbl_fair"))}</td>${sels.map((s) => `<td class="odds">${fmtOdds(1 / cons[s])}<span class="sub">${fmtPct(cons[s])}</span></td>`).join("")}<td></td></tr>` : "";
   const finRow = `<tr class="summary"><td>${esc(t("tbl_final"))}</td>${sels.map((s) => { const f = fin[s]; return `<td class="odds">${f && f.fair_odds ? fmtOdds(f.fair_odds) : "–"}<span class="sub">${f ? fmtPct(f.final_prob) : ""}</span></td>`; }).join("")}<td></td></tr>`;
   const meta = t("tbl_meta", { n: m.consensus.n_books, c: m.consensus.method || "–", m: m.avg_margin_pct ?? "–" }) + (m.arbitrage_pct ? ` · ARBITRAGE +${m.arbitrage_pct}%` : "");
+  // bookmakers that are deliberately left out of the comparison, with the reason
+  const excluded = (m.excluded_books || []).map((b) => b.name), ignored = m.books.filter((b) => b.role === "ignored").map((b) => b.name);
+  const notes = (excluded.length ? `<div class="tiny" style="color:var(--amber);margin-bottom:6px">${esc(t("tbl_excluded", { names: excluded.join(", ") }))}</div>` : "")
+    + (ignored.length ? `<div class="tiny" style="color:var(--amber);margin-bottom:6px">${esc(t("tbl_ignored", { names: ignored.join(", ") }))}</div>` : "");
   return `<details class="market" ${open ? "open" : ""}><summary><span>${esc(m.label)}</span><span class="small muted">${esc(t("books", { n: m.books.length }))}</span></summary>
-    <div class="small muted" style="margin-bottom:6px">${esc(meta)}</div>
+    <div class="small muted" style="margin-bottom:6px">${esc(meta)}</div>${notes}
     <div class="table-wrap"><table class="odds-table"><thead><tr><th>${esc(t("tbl_bookmaker"))}</th>${sels.map((s) => `<th>${esc(m.selection_labels[s])}</th>`).join("")}<th>${esc(t("tbl_margin"))}</th></tr></thead>
     <tbody>${rows}${consRow}${finRow}</tbody></table></div><div class="tiny faint" style="margin-top:6px">${t("tbl_legend")}</div></details>`;
 }
@@ -541,6 +545,7 @@ function picksQuery() {
   const q = new URLSearchParams();
   if (mode) q.set("mode", mode);
   if (mode === "fixed" && min) q.set("min_odds", min);
+  if (store.get("bf_picks_scope", "today") === "upcoming") q.set("scope", "upcoming");
   return q.toString() ? `?${q}` : "";
 }
 
@@ -555,17 +560,23 @@ async function viewPicks(token) {
 }
 
 function renderPicks(d) {
-  const c = d.criteria;
+  const c = d.criteria, g = d.diagnostics, upcoming = d.scope === "upcoming";
   let body;
-  if (d.message) {
-    const rej = Object.entries(d.diagnostics.rejections || {}).map(([k, v]) => `<li>${esc(t(`rej_${k}`))}: ${v}</li>`).join("");
-    body = `<div class="empty"><div class="big">${esc(d.message)}</div><div class="small">${esc(t("picks_checked", { m: d.diagnostics.matches_in_window, q: d.diagnostics.qualifying_selections }))}</div>
-      ${d.diagnostics.note ? `<div class="small" style="margin-top:6px">${esc(d.diagnostics.note)}</div>` : ""}
+  if (d.message && g.stale) {
+    // the stored prices are too old to judge anything: say so, and offer a refresh to those who may start one
+    body = `<div class="empty"><div class="big">${esc(d.message)}</div><div class="small">${esc(t("picks_odds_age", { t: agoIso(g.odds_updated_at) }))}</div>
+      ${can("refresh") ? `<div style="margin-top:12px"><button class="btn small" type="button" data-action="refreshNow">${esc(t("picks_stale_btn"))}</button></div>` : ""}</div>`;
+  } else if (d.message) {
+    const rej = Object.entries(g.rejections || {}).map(([k, v]) => `<li>${esc(t(`rej_${k}`))}: ${v}</li>`).join("");
+    body = `<div class="empty"><div class="big">${esc(d.message)}</div><div class="small">${esc(t("picks_checked", { m: g.matches_in_window, q: g.qualifying_selections }))}</div>
+      ${g.note ? `<div class="small" style="margin-top:6px">${esc(g.note)}</div>` : ""}
       ${rej ? `<div class="small" style="margin-top:10px;text-align:left;display:inline-block">${esc(t("picks_rejected"))}<ul style="margin:4px 0 0">${rej}</ul></div>` : ""}</div>`;
   } else {
     body = d.coupons.map(couponCard).join("");
-    if (d.coupons.length < c.max_coupons) body += `<div class="small muted" style="margin-top:10px">${esc(t("picks_fewer", { n: d.coupons.length }))}</div>`;
+    if (!upcoming && d.coupons.length < c.max_coupons) body += `<div class="small muted" style="margin-top:10px">${esc(t("picks_fewer", { n: d.coupons.length }))}</div>`;
   }
+  const scopeBar = `<div class="seg" style="margin-bottom:10px"><button type="button" data-action="picksScope" data-v="today" class="${upcoming ? "" : "on"}">${esc(t("ps_today"))}</button><button type="button" data-action="picksScope" data-v="upcoming" class="${upcoming ? "on" : ""}">${esc(t("ps_upcoming"))}</button></div>
+    ${upcoming ? `<div class="small muted" style="margin-bottom:10px">${esc(t("picks_upcoming_note"))}</div>` : ""}`;
   const singles = d.singles.length ? `<div class="section-title" id="sec-singles">${esc(t("picks_singles"))}</div><div class="card sel-list">${d.singles.map((l) => `
     <div class="sel-row click-row" data-action="openMatch" data-id="${esc(l.fixture_id)}"><div><div class="name">${esc(l.selection_label)}</div><div class="small muted">${esc(l.match)} · ${esc(l.market_label)}</div></div>
     <div class="pos" style="font-weight:750">${fmtEv(l.ev_pct)}</div><div class="facts"><span><b class="odds">${fmtOdds(l.odds)}</b> ${esc(l.bookmaker_name)}</span><span>p <b>${fmtPct(l.probability)}</b></span><span>${esc(t("fair"))} <b>${fmtOdds(l.fair_odds)}</b></span>${riskChip(l.risk_rating)}</div></div>`).join("")}</div>` : "";
@@ -574,9 +585,10 @@ function renderPicks(d) {
       <div class="seg"><button type="button" data-action="picksMode" data-v="auto" class="${auto ? "on" : ""}">${esc(t("pm_auto"))}</button><button type="button" data-action="picksMode" data-v="fixed" class="${auto ? "" : "on"}">${esc(t("pm_fixed"))}</button></div>
       ${auto ? "" : `<label class="small muted" for="pmMin">${esc(t("pm_min"))}</label><input class="input" id="pmMin" type="number" min="1.1" max="50" step="0.1" value="${Number(c.coupon_min_odds).toFixed(2)}" style="max-width:96px" data-change="picksMin">`}</div>
     <div class="tiny muted" style="margin-top:6px">${esc(t(auto ? "pm_auto_d" : "pm_fixed_d", { o: Number(c.coupon_min_odds).toFixed(2) }))}</div></div>`;
-  return head(t("picks_title"), esc(t("picks_sub", { n: c.max_coupons })) + "<br>" + esc(t("picks_window", { w: `${fmtTime(d.window.from)} → ${fmtTime(d.window.to)}` }))) + modeBar + `<div id="sec-coupons"></div>` + body + singles + `
+  return head(t("picks_title"), esc(t("picks_sub", { n: c.max_coupons })) + "<br>" + esc(t("picks_window", { w: `${fmtTime(d.window.from)} → ${fmtTime(d.window.to)}` }))) + scopeBar + modeBar + `<div id="sec-coupons"></div>` + body + singles + `
     <div class="section-title" id="sec-criteria">${esc(t("criteria"))}</div><div class="card small"><dl class="kv">
-      <dt>${esc(t("cr_ev"))}</dt><dd>${c.min_ev_pct}%</dd><dt>${esc(t("cr_edge"))}</dt><dd>≥ ${c.min_market_edge_pct}%</dd>
+      <dt>${esc(t("cr_ev"))}</dt><dd>${c.min_ev_pct}%</dd><dt>${esc(t("cr_ev_weak"))}</dt><dd>${c.min_ev_weak_anchor_pct}%</dd>
+      <dt>${esc(t("cr_edge"))}</dt><dd>≥ ${c.min_market_edge_pct}%</dd>${c.min_soft_edge_pct != null && c.min_soft_edge_pct > -100 ? `<dt>${esc(t("cr_soft"))}</dt><dd>≥ ${c.min_soft_edge_pct}%</dd>` : ""}
       <dt>${esc(t("cr_conf"))}</dt><dd>${c.min_confidence}</dd><dt>${esc(t("cr_risk"))}</dt><dd>${esc(t(`risk_${c.max_risk}`))}</dd>
       <dt>${esc(t("cr_prob"))}</dt><dd>${fmtPct(c.min_leg_probability, 0)}</dd><dt>${esc(t("cr_coupon"))}</dt><dd>${c.coupon_odds_mode === "fixed" ? `&gt; ${Number(c.coupon_min_odds).toFixed(2)}` : esc(t("pm_auto"))}, ≤ ${c.coupon_max_legs} ${esc(t("cr_legs"))}</dd>
       <dt>${esc(t("cr_books"))}</dt><dd>${c.my_bookmakers.length ? esc(c.my_bookmakers.join(", ")) : esc(t("all"))}</dd></dl>
@@ -588,11 +600,14 @@ function couponCard(cp) {
   const legs = cp.legs.map((l) => `<div class="leg"><div class="lt"><div><div class="match">${esc(l.match)}</div><div class="small muted">${sportIcon(l.sport)} ${esc(sportLabel(l.sport))} · ${esc(l.competition)} · ${fmtTime(l.kickoff)}</div></div>${riskChip(l.risk_rating)}</div>
     <div style="margin-top:6px"><b>${esc(l.selection_label)}</b> <span class="muted small">· ${esc(l.market_label)}</span> ${l.tier === "strong" ? chip("blue", t("tier_strong")) : ""} ${devChip(l.deviation_level)} ${srcChip(sourceKind(l.source))}</div>
     <div class="facts"><div class="fact"><div class="k">${esc(t("l_odds"))}</div><div class="v odds">${fmtOdds(l.odds)}</div></div>
+      ${l.min_odds ? `<div class="fact"><div class="k">${esc(t("l_min_odds"))}</div><div class="v odds">${fmtOdds(l.min_odds)}</div></div>` : ""}
       <div class="fact"><div class="k">${esc(t("l_book"))}</div><div class="v" style="font-size:0.8rem">${esc(l.bookmaker_name)}</div></div>
       <div class="fact"><div class="k">${esc(t("l_prob"))}</div><div class="v">${fmtPct(l.probability)}</div></div>
       <div class="fact"><div class="k">${esc(t("l_fair"))}</div><div class="v odds">${fmtOdds(l.fair_odds)}</div></div>
       <div class="fact"><div class="k">${esc(t("l_value"))}</div><div class="v pos">${fmtEv(l.ev_pct)}</div></div>
-      <div class="fact"><div class="k">${esc(t("l_conf"))}</div><div class="v">${l.confidence}</div></div></div>
+      <div class="fact"><div class="k">${esc(t("l_conf"))}</div><div class="v">${l.confidence}</div></div>
+      ${cp.mixed_books && l.stake_amount > 0 ? `<div class="fact"><div class="k">${esc(t("l_stake"))}</div><div class="v">${l.stake_amount} ${esc(cp.currency || "")}</div></div>` : ""}</div>
+    ${l.commission_pct ? `<div class="tiny muted" style="margin-bottom:4px">${esc(t("l_net", { o: fmtOdds(l.net_odds), c: l.commission_pct }))}</div>` : ""}
     <div class="small muted">${esc(l.explanation)}</div><a class="small" href="#match/${encodeURIComponent(l.fixture_id)}">${esc(t("full_analysis"))}</a></div>`).join("");
   const PROF = { safe: ["green", "pf_safe_d"], value: ["blue", "pf_value_d"], big: ["violet", "pf_big_d"] };
   const prof = PROF[cp.profile];
@@ -603,7 +618,7 @@ function couponCard(cp) {
     <div class="grid-3" style="margin-bottom:6px"><div class="fact"><div class="k">${esc(t("c_winprob"))}</div><div class="v">${fmtPct(cp.combined_probability)}</div></div>
       <div class="fact"><div class="k">${esc(t("c_fair"))}</div><div class="v odds">${fmtOdds(cp.combined_fair_odds)}</div></div>
       <div class="fact"><div class="k">${esc(t("c_ev"))}</div><div class="v pos">${fmtEv(cp.combined_ev_pct)}</div></div></div>
-    ${legs}<div class="spread" style="margin-top:10px"><span class="small muted">${esc(t("c_kelly", { p: cp.stake_pct, a: cp.stake_amount, cur: cp.currency || "" }))}</span>
+    ${legs}${cp.mixed_books ? `<div class="small" style="margin-top:8px;color:var(--amber)">${esc(t("c_mixed"))}</div>` : ""}<div class="spread" style="margin-top:10px"><span class="small muted">${esc(t("c_kelly", { p: cp.stake_pct, a: cp.stake_amount, cur: cp.currency || "" }))}</span>
       <button class="btn small" data-action="trackCoupon" data-id="${esc(cp.id)}">${esc(t("c_track"))}</button></div></div>`;
 }
 
@@ -922,7 +937,7 @@ function renderUsage(u, plan, st) {
 }
 
 // ------------------------------------------------------------------- sources
-const NUM_SETTINGS = [["min_ev_pct", 0.5], ["min_market_edge_pct", 0.5], ["min_confidence", 1], ["min_leg_probability", 0.01], ["max_leg_odds", 0.1],
+const NUM_SETTINGS = [["min_ev_pct", 0.5], ["min_ev_weak_anchor_pct", 0.5], ["min_soft_edge_pct", 0.5], ["min_market_edge_pct", 0.5], ["min_confidence", 1], ["min_leg_probability", 0.01], ["max_leg_odds", 0.1],
   ["coupon_min_odds", 0.1], ["coupon_max_legs", 1], ["max_coupons", 1], ["deviation_warning_pct", 0.5], ["deviation_alert_pct", 0.5], ["suspicious_ev_pct", 1],
   ["stale_minutes", 10], ["model_weight", 0.05], ["max_logit_shift", 0.05], ["bankroll", 10], ["kelly_fraction", 0.05], ["lookahead_hours", 6],
   ["day_end_hour", 1], ["auto_refresh_minutes", 5], ["active_hours_start", 1], ["active_hours_end", 1], ["retention_days", 1]];
@@ -1060,6 +1075,8 @@ const actions = {
   builderClear: () => { builder.clear(); route(); },
   builderCalc: () => builderCalc(null),
   picksMode: (el) => { store.set("bf_picks_mode", el.dataset.v); route(); },
+  picksScope: (el) => { store.set("bf_picks_scope", el.dataset.v); route(); },
+  refreshNow: () => doRefresh(),
   fetchMore: async (el) => {
     el.disabled = true;
     try { const r = await api(`/api/fixtures/${encodeURIComponent(el.dataset.fid)}/fetch-more`, { method: "POST" }); toast(t("m_more_books_done", { n: r.quotes, b: r.budget_left }), 5000); route(); }

@@ -14,11 +14,19 @@ Two ways to decide the coupon odds:
 * **fixed**: every coupon must have combined odds above ``coupon_min_odds``
   (3.00 by default), ranked by Kelly growth - the classic behaviour.
 
+Two scopes:
+* **today**: from now until tomorrow's end-of-day hour,
+* **upcoming**: the days after that, as far as odds are fetched (early prices).
+
 Always true:
 * one selection per match, and coupons never share a match,
 * never forced: no good coupon gives the message
-  "No qualifying value bets found today.",
+  "No qualifying value bets found today." - or, when the stored prices are
+  simply too old to judge, a message that says so,
 * every leg has positive expected value; high odds alone never qualify.
+
+Legs of one coupon can be priced at different bookmakers.  Such a coupon
+cannot be placed as one bet: each leg is its own bet (``mixed_books``).
 """
 from __future__ import annotations
 
@@ -40,7 +48,11 @@ STRONG_EXTRA_CONF = 5       # ... a bit more confident than the minimum ...
 STRONG_MIN_EV = 1.0         # ... and still a real (small) edge
 SAFE_MIN_PROB = 0.45
 BIG_ODDS = 3.0
+# Ranking does not reward an edge beyond this.  A very large edge is most often a pricing error
+# that the bookmaker can void, or a problem in the data: it should not outrank a solid, likely pick.
+EV_SCORE_CAP = 6.0
 PROFILES = ("safe", "value", "big")
+SCOPES = ("today", "upcoming")
 
 
 def day_window(now: datetime, settings: dict) -> tuple[datetime, datetime, str]:
@@ -57,8 +69,21 @@ def day_window(now: datetime, settings: dict) -> tuple[datetime, datetime, str]:
     return now, end.astimezone(now.tzinfo), day
 
 
+def upcoming_window(now: datetime, settings: dict) -> tuple[datetime, datetime, str]:
+    """The days after today's window, as far ahead as odds are fetched (``lookahead_hours``)."""
+    _start, today_end, day = day_window(now, settings)
+    horizon = now + timedelta(hours=int(settings.get("lookahead_hours", 72)))
+    return today_end, max(horizon, today_end), day
+
+
+def _price(leg: dict) -> float:
+    """What the leg really pays: exchange prices count after commission."""
+    return leg.get("net_odds") or leg["odds"]
+
+
 def _leg(analysis: dict, sel: dict, tier: str) -> dict:
     fx = analysis["fixture"]
+    best = sel["best"]
     return {
         "fixture_id": fx["id"],
         "match": f"{fx['home']} vs {fx['away']}",
@@ -71,13 +96,18 @@ def _leg(analysis: dict, sel: dict, tier: str) -> dict:
         "market_label": sel["market_label"],
         "selection": sel["selection"],
         "selection_label": sel["label"],
-        "bookmaker": sel["best"]["bookmaker"],
-        "bookmaker_name": sel["best"]["name"],
-        "source": sel["best"]["source"],
-        "odds": sel["best"]["odds"],
+        "bookmaker": best["bookmaker"],
+        "bookmaker_name": best["name"],
+        "source": best["source"],
+        "odds": best["odds"],
+        "net_odds": best.get("net_odds") or best["odds"],
+        "commission_pct": best.get("commission_pct"),
+        "min_odds": sel.get("min_odds"),  # only bet while the price is still at least this
         "probability": sel["final_prob"],
         "fair_odds": sel["fair_odds"],
         "ev_pct": sel["ev_pct"],
+        "required_ev_pct": sel.get("required_ev_pct"),
+        "anchor": sel.get("anchor"),
         "risk_rating": sel["risk_rating"],
         "confidence": sel["confidence"],
         "explanation": sel["explanation"],
@@ -95,9 +125,10 @@ def _is_strong(sel: dict, codes: list[str], settings: dict) -> bool:
             and sel["confidence"] >= int(settings["min_confidence"]) + STRONG_EXTRA_CONF)
 
 
-def build_daily_picks(analyses: list[dict], settings: dict, now: datetime) -> dict:
+def build_daily_picks(analyses: list[dict], settings: dict, now: datetime, scope: str = "today") -> dict:
     lang = lang_of(settings)
-    start, end, day = day_window(now, settings)
+    scope = scope if scope in SCOPES else "today"
+    start, end, day = upcoming_window(now, settings) if scope == "upcoming" else day_window(now, settings)
     mode = settings.get("coupon_odds_mode", "auto")
     min_prob = float(settings["min_leg_probability"])
     max_odds = float(settings["max_leg_odds"])
@@ -107,13 +138,20 @@ def build_daily_picks(analyses: list[dict], settings: dict, now: datetime) -> di
 
     rejections: Counter = Counter()
     candidates: list[dict] = []
-    in_window = 0
+    in_window = priced = 0
+    newest: Optional[datetime] = None
     for a in analyses:
         fx = a["fixture"]
         kickoff = datetime.fromisoformat(fx["kickoff"])
-        if fx["status"] != "scheduled" or not (start <= kickoff <= end):
+        inside = start < kickoff <= end if scope == "upcoming" else start <= kickoff <= end
+        if fx["status"] != "scheduled" or not inside:
             continue
         in_window += 1
+        if any(s["ev_pct"] is not None for s in a["selections"]):
+            priced += 1
+        if a.get("odds_updated_at"):
+            stamp = datetime.fromisoformat(a["odds_updated_at"])
+            newest = stamp if newest is None or stamp > newest else newest
         best_for_match: Optional[dict] = None
         for s in a["selections"]:
             if s["ev_pct"] is None or s["ev_pct"] <= 0:
@@ -132,7 +170,8 @@ def build_daily_picks(analyses: list[dict], settings: dict, now: datetime) -> di
                     rejections[c] += 1
                 continue
             # value legs first; within a tier: edge x confidence, plus a bonus for likely outcomes
-            score = (s["ev_pct"] + 10 * (s["final_prob"] or 0)) * s["confidence"] * (1.0 if tier == "value" else 0.6)
+            score = ((min(s["ev_pct"], EV_SCORE_CAP) + 10 * (s["final_prob"] or 0)) * s["confidence"]
+                     * (1.0 if tier == "value" else 0.6))
             if best_for_match is None or score > best_for_match["_score"]:
                 best_for_match = {**_leg(a, s, tier), "_score": score}
         if best_for_match:
@@ -164,27 +203,45 @@ def build_daily_picks(analyses: list[dict], settings: dict, now: datetime) -> di
         coupons.append(coupon)
         used |= {leg["fixture_id"] for leg in picked}
 
+    # Nothing can be judged from old prices: say that instead of "no value".
+    age_min = (now - newest).total_seconds() / 60 if newest else None
+    stale = bool(in_window and not priced and age_min is not None and age_min > float(settings.get("stale_minutes", 240)))
+    if coupons:
+        message = None
+    elif stale:
+        message = tr(lang, "dp_stale", h=max(1, round(age_min / 60)))
+    else:
+        message = tr(lang, "dp_none" if scope == "today" else "dp_none_upcoming")
+
     singles = [_strip(c) for c in candidates if c["fixture_id"] not in used]
     note = None
     if candidates and not coupons:
         note = tr(lang, "dp_note_no_combo", n=max_legs, target=f"{target:.2f}") if mode == "fixed" else tr(lang, "dp_note_auto")
     return {
         "date": day,
+        "scope": scope,
         "generated_at": now.isoformat(),
         "window": {"from": start.isoformat(), "to": end.isoformat()},
         "coupons": coupons,
-        "message": None if coupons else tr(lang, "dp_none"),
+        "message": message,
         "singles": singles,
         "diagnostics": {
             "matches_in_window": in_window,
+            "matches_priced": priced,
             "qualifying_selections": len(candidates),
             "value_selections": sum(1 for c in candidates if c["tier"] == "value"),
             "strong_candidates": sum(1 for c in candidates if c["tier"] == "strong"),
             "rejections": dict(rejections.most_common()),
             "note": note,
+            "stale": stale,
+            "odds_updated_at": newest.isoformat() if newest else None,
+            "odds_age_minutes": round(age_min) if age_min is not None else None,
         },
         "criteria": {
-            "min_ev_pct": settings["min_ev_pct"], "min_confidence": settings["min_confidence"],
+            "min_ev_pct": settings["min_ev_pct"],
+            "min_ev_weak_anchor_pct": settings.get("min_ev_weak_anchor_pct", settings["min_ev_pct"]),
+            "min_soft_edge_pct": settings.get("min_soft_edge_pct"),
+            "min_confidence": settings["min_confidence"],
             "max_risk": settings["max_risk"], "min_market_edge_pct": settings["min_market_edge_pct"],
             "min_leg_probability": min_prob, "max_leg_odds": max_odds, "coupon_odds_mode": mode,
             "coupon_min_odds": target, "coupon_max_legs": max_legs, "max_coupons": max_coupons,
@@ -233,7 +290,7 @@ def _best_combo(pool: list[dict], max_legs: int, scorer: Scorer) -> Optional[lis
     best, best_score = None, 0.0
     for size in range(1, max_legs + 1):
         for combo in itertools.combinations(pool, size):
-            o = combined_odds(c["odds"] for c in combo)
+            o = combined_odds(_price(c) for c in combo)
             p = combined_probability(c["probability"] for c in combo)
             f = kelly_fraction(p, o)
             if f <= 0:
@@ -249,7 +306,7 @@ def _strip(c: dict) -> dict:
 
 
 def _coupon(legs: list[dict], number: int, profile: str, settings: dict, lang: str) -> dict:
-    o = combined_odds(leg["odds"] for leg in legs)
+    o = combined_odds(_price(leg) for leg in legs)
     p = combined_probability(leg["probability"] for leg in legs)
     risk_idx = max(RISK_LEVELS.index(leg["risk_rating"]) for leg in legs)
     if p < 0.25:
@@ -269,5 +326,7 @@ def _coupon(legs: list[dict], number: int, profile: str, settings: dict, lang: s
         "stake_amount": round(stake * float(settings["bankroll"]), 2),
         "currency": settings.get("currency", "DKK"),
         "has_strong": any(leg["tier"] == "strong" for leg in legs),
+        # legs at different bookmakers cannot be one bet: each leg is placed on its own
+        "mixed_books": len({leg["bookmaker"] for leg in legs}) > 1,
         "note": tr(lang, "dp_indep"),
     }

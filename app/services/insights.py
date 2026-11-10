@@ -17,7 +17,7 @@ def arbitrage(analyses: list[dict], stake: float = 100.0) -> list[dict]:
             if not m.get("arbitrage_pct"):
                 continue
             sels = m["selections"]
-            inv = {s: 1 / m["best"][s]["odds"] for s in sels}
+            inv = {s: 1 / (m["best"][s].get("net_odds") or m["best"][s]["odds"]) for s in sels}  # after exchange commission
             total_inv = sum(inv.values())
             legs = [{"selection": s, "label": m["selection_labels"][s], "bookmaker": m["best"][s]["name"],
                      "odds": m["best"][s]["odds"], "stake": round(stake * inv[s] / total_inv, 2),

@@ -32,7 +32,7 @@ Open <http://localhost:8000>, sign in with **admin / admin** and change the pass
 - **Dashboard**: value bets, pricing errors, dropping odds, today's coupons and tracker performance at a glance.
 - **Scanner**: every upcoming match with odds, grouped by category and sport, with filters for value, deviation level (5%+ / 10%+) and sorting.
 - **Match analysis**: bookmaker comparison table, margin-free fair odds, price movement charts, all ten agents' findings and team news.
-- **Daily Picks**: up to 3 coupons (adjustable 1–5) with different matches and at most 3 legs each. *Auto* mode mixes safe, value and bigger-odds coupons; *fixed* mode requires combined odds above a minimum (3.00 by default). Coupons are never forced: with nothing good you see "No qualifying value bets found today."
+- **Daily Picks**: up to 3 coupons (adjustable 1–5) with different matches and at most 3 legs each. *Auto* mode mixes safe, value and bigger-odds coupons; *fixed* mode requires combined odds above a minimum (3.00 by default). A *Coming days* tab shows early-price picks for the days after today. Every leg shows the lowest odds at which it is still worth taking. Coupons are never forced: with nothing good you see "No qualifying value bets found today.", and when the stored odds are simply too old to judge, the page says that instead.
 - **Add odds**: find a known match by typing team names (or create one), enter several bookmakers at once, or paste odds straight from a bookmaker's page.
 - **Bet builder**: combine selections. Same-match legs use the sport model's joint probability (e.g. "home win + over 2.5" is positively correlated).
 - **Arbitrage finder** with a stake calculator.
@@ -90,13 +90,28 @@ Sources 1–3 run in parallel on every refresh; 4 and 5 are fallbacks. Every ref
 
 The bookmaker consensus is the anchor, and the agents can only move it within limits. A selection **qualifies** only when all of these hold (every threshold can be changed under *Sources & settings → Analysis & Daily Picks settings*):
 
-- EV ≥ 3%
+- EV ≥ 1.5% where a sharp bookmaker (Pinnacle) or a liquid exchange sets the fair price, EV ≥ 3% in every other market
 - the price is at or above the fair market price
+- the price is at most 4% below the fair price of the *other* ordinary bookmakers. This is a safety net: when value rests on the sharp reference alone and the gap is that large, the reference is usually the one that is wrong
 - confidence ≥ 55
 - risk ≤ medium
 - the price is at one of your bookmakers (if you ticked any)
 
-Formulas: implied probability = 1 / odds · EV % = (p × odds − 1) × 100 · fair odds = 1 / p · stake = quarter-Kelly, shown in your currency (DKK by default).
+Three rules keep the fair price itself honest:
+
+- **A reference must have a real market.** An exchange only counts as sharp when its own overround is at most 5%; between 5% and 12% it is treated like any other bookmaker, and above that (or when it is far away from every other bookmaker) it is ignored. An exchange without liquidity shows prices nobody can bet.
+- **Exchange commission is taken off first.** Betfair 5%, Matchbook and Smarkets 2% of winnings by default (`commission_pct` in `data/registry/bookmakers.json`).
+- **Ice hockey: regulation time and overtime are different bets.** Bookmakers that price the 3-way regulation result also price totals and handicaps for regulation time. Those are never compared with overtime-inclusive prices.
+
+Where these numbers come from: a backtest of this exact recipe on 20,750 football matches (17 leagues, 2022–2026), run with `python tools/backtest_value_rule.py`.
+
+- **1.5%.** In the top five leagues, edges of 1.5–3% beat the closing line as well as larger ones (about 80% of the time, closing-line value around +3.6%), and there are three times as many of them as edges above 3%.
+- **Exchange limits.** Of 8,407 Betfair Exchange quotes, those with an overround up to 5% were exactly as accurate as Pinnacle. Above 12% (6% of all quotes) they were useless, on average 19 percentage points away from Pinnacle. Counting those as "sharp" was the main source of false value.
+- **4% safety net.** When all ordinary bookmakers lag a sharp move, the price sits 2–4% below their fair price and the value is real (closing-line value about +3%). Beyond 4% it was close to zero (+0.7%, and only a handful of cases).
+
+The backtest covers football 1X2 with UK-facing bookmakers only, and realised profit was inconclusive at that sample size. Treat the thresholds as a starting point and watch your own CLV in the tracker.
+
+Formulas: implied probability = 1 / odds · EV % = (p × odds − 1) × 100 · fair odds = 1 / p · exchange odds after commission = 1 + (odds − 1) × (1 − commission) · stake = quarter-Kelly, shown in your currency (DKK by default).
 
 ## Project structure
 
@@ -117,6 +132,7 @@ app/
 data/registry/             bookmakers.json and competitions.json (edit these to add more)
 data/runtime/              your local data: settings, odds history, accounts, tracker (git-ignored)
 tests/                     pytest suite
+tools/                     backtest of the value rule on public football results (not part of the app)
 deploy/Caddyfile, Dockerfile, docker-compose.yml   self-hosting with automatic HTTPS
 vercel.json, pyproject.toml, .vercelignore          Vercel hosting
 .github/workflows/refresh.yml                      hourly refresh for Vercel

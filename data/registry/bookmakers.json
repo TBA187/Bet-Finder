@@ -100,7 +100,8 @@
      "Betfair"
     ]
    },
-   "note": "Exchange back prices, excluding commission."
+   "commission_pct": 5.0,
+   "note": "Exchange back prices. BetFinder takes the commission (commission_pct, on winnings) off before it compares the price; change it here if your rate is different."
   },
   {
    "key": "matchbook",
@@ -114,7 +115,8 @@
     "the_odds_api": [
      "matchbook"
     ]
-   }
+   },
+   "commission_pct": 2.0
   },
   {
    "key": "betsson",
@@ -671,7 +673,8 @@
     "the_odds_api": [
      "smarkets"
     ]
-   }
+   },
+   "commission_pct": 2.0
   },
   {
    "key": "atg",

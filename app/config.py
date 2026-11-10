@@ -15,7 +15,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from app.core.odds_math import DEVIG_METHODS
 from app.storage.json_store import JsonStore
 
-APP_VERSION = "1.5.3"  # keep in sync with pyproject.toml; also busts the browser cache of CSS/JS
+APP_VERSION = "1.6.0"  # keep in sync with pyproject.toml; also busts the browser cache of CSS/JS
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 RISK_LEVELS = ("low", "medium", "high", "very_high")
@@ -41,7 +41,16 @@ _SPEC: dict[str, tuple[Any, dict]] = {
     "lookahead_hours": (72, {"type": int, "min": 6, "max": 168}),
     "devig_method": ("shin", {"type": str, "choices": DEVIG_METHODS}),
     # Value / qualification thresholds
-    "min_ev_pct": (3.0, {"type": float, "min": 0.0, "max": 50.0}),
+    # min_ev_pct applies where a sharp bookmaker or a liquid exchange sets the fair price (in a backtest
+    # on 20,750 football matches edges of 1.5-3% beat the closing line as well as larger ones, see
+    # tools/backtest_value_rule.py); every other market needs min_ev_weak_anchor_pct.
+    "min_ev_pct": (1.5, {"type": float, "min": 0.0, "max": 50.0}),
+    "min_ev_weak_anchor_pct": (3.0, {"type": float, "min": 0.0, "max": 50.0}),
+    # Safety net: the price may be at most this far below the fair price of the OTHER ordinary
+    # bookmakers.  When all of them lag a sharp move the gap is 2-4% and the value is real (backtest:
+    # CLV +3%); a larger gap means the value rests on the reference alone, which is then usually the
+    # one that is wrong.  -100 disables.
+    "min_soft_edge_pct": (-4.0, {"type": float, "min": -100.0, "max": 50.0}),
     # The price must be at least this far above the margin-free market price.
     # 0 = the agents can raise or lower EV but can never create value alone
     # against an efficient market.  Set to -100 to disable.

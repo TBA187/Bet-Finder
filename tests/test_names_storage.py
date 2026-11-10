@@ -169,6 +169,6 @@ def test_settings_from_environment(monkeypatch, tmp_path):
     monkeypatch.setenv("BETFINDER_MIN_EV_PCT", "not-a-number")  # invalid -> ignored, default kept
     svc = SettingsService(JsonStore(tmp_path))
     s = svc.get()
-    assert s["scraper_mode"] == "always" and s["my_bookmakers"] == ["danske_spil", "nordicbet"] and s["min_ev_pct"] == 3.0
+    assert s["scraper_mode"] == "always" and s["my_bookmakers"] == ["danske_spil", "nordicbet"] and s["min_ev_pct"] == 1.5
     svc.update({"scraper_mode": "off"})  # a choice made in the app wins
     assert svc.get()["scraper_mode"] == "off"

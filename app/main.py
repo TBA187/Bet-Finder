@@ -62,8 +62,8 @@ class Container:
     def analyses(self, now: datetime, s: dict) -> list[dict]:
         return [self.analysis.analyze(fx, s, now) for fx in self.upcoming(now, s)]
 
-    def daily_picks(self, now: datetime, s: dict, analyses: Optional[list[dict]] = None) -> dict:
-        result = build_daily_picks(analyses if analyses is not None else self.analyses(now, s), s, now)
+    def daily_picks(self, now: datetime, s: dict, analyses: Optional[list[dict]] = None, scope: str = "today") -> dict:
+        result = build_daily_picks(analyses if analyses is not None else self.analyses(now, s), s, now, scope)
         for coupon in result["coupons"]:
             key = json.dumps([(leg["fixture_id"], leg["market_id"], leg["selection"], leg["bookmaker"], leg["odds"])
                               for leg in coupon["legs"]])

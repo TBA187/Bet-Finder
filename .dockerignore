@@ -4,5 +4,6 @@ __pycache__
 .pytest_cache
 data/runtime
 tests
+tools
 .claude
 .env

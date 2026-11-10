@@ -502,15 +502,16 @@ def build_router(c) -> APIRouter:  # c: Container
     # ------------------------------------------------------------ daily picks
     @r.get("/daily-picks")
     def daily_picks(mode: Optional[Literal["auto", "fixed"]] = None,
-                    min_odds: Optional[float] = Query(None, ge=1.1, le=50)):
+                    min_odds: Optional[float] = Query(None, ge=1.1, le=50),
+                    scope: Literal["today", "upcoming"] = "today"):
         """``mode`` / ``min_odds`` let each person try auto or a fixed minimum without
-        changing the shared setting."""
+        changing the shared setting.  ``scope=upcoming`` gives the coming days (early prices)."""
         s = settings()
         if mode:
             s = {**s, "coupon_odds_mode": mode}
         if min_odds:
             s = {**s, "coupon_min_odds": min_odds}
-        return c.daily_picks(utcnow(), s)
+        return c.daily_picks(utcnow(), s, scope=scope)
 
     # -------------------------------------------------------------- builder
     @r.post("/builder")
