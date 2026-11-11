@@ -176,8 +176,10 @@ class ScraperProvider:
         path = [str(p.get("englishName") or p.get("name") or "") for p in (e.get("path") or [])]
         country = path[1] if len(path) >= 3 else ""  # [sport, country, league]
         leagues = tuple(x for x in (path[-1] if path else "", str(e.get("group", ""))) if x)
+        # the whole path goes along as context: a women's marker anywhere in it ("Bundesliga (W)", a "Women"
+        # level above the league) keeps the event away from the men's fixtures and competitions
         hit = attach(self.repo, self.registry, NAME, sport, str(e.get("id")), home, away, ko, leagues, known, create=True,
-                     country=country)
+                     country=country, context=tuple(path))
         if not hit:
             return 0
         fx, swapped = hit

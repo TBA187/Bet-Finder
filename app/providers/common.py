@@ -9,7 +9,7 @@ from typing import Any, Optional
 
 from app.core.markets import swap_sides
 from app.core.models import Fixture, Quote
-from app.core.names import find_fixture, strip_accents
+from app.core.names import find_fixture, fixture_squad, split_squad, strip_accents
 from app.services.registry import Registry
 from app.services.repository import Repository
 
@@ -56,20 +56,36 @@ def _league_norm(text: str) -> str:
     return " ".join(t for t in text.split() if t not in ("fc", "the", "men", "mens"))
 
 
-def match_competition(registry: Registry, sport: str, *names: str, country: str = "") -> Optional[dict]:
+def _numbers(text: str) -> list[str]:
+    return sorted(re.findall(r"\d+", text))
+
+
+def match_competition(registry: Registry, sport: str, *names: str, country: str = "",
+                      squad: Optional[frozenset] = None) -> Optional[dict]:
     """Enabled registry competition matching a provider's league name (and country, when known).
 
-    Deliberately strict: a wrong league is worse than a missing one."""
+    Deliberately strict: a wrong league is worse than a missing one.  Two things are never left to the
+    spelling score, because one short word is all that separates them from another league:
+
+    * the squad - ``squad`` is the event's women's / youth markers (``names.fixture_squad``; taken from the
+      league names when not given) and must equal the competition's: "Bundesliga (W)", or a "Bundesliga" match
+      between two "(W)" teams, never resolves to the men's Bundesliga,
+    * numbers - "2. Bundesliga" and "Premier League 2" are not "Bundesliga" and "Premier League"."""
+    if squad is None:
+        squad = frozenset().union(*(split_squad(n, sport, league=True)[1] for n in names))
     best, best_score = None, 0.0
     cn = _league_norm(country)
     for comp in registry.competitions(sport=sport, enabled_only=True):
         cc = _league_norm(comp.get("country", ""))
         if cn and cc not in ("europe", "world", "") and cn != cc:
             continue
-        target = _league_norm(comp["name"])
+        comp_name, comp_squad = split_squad(comp["name"], sport, league=True)
+        if comp_squad | split_squad(comp["id"], sport, league=True)[1] != squad:
+            continue
+        target = _league_norm(comp_name)
         for name in names:
-            n = _league_norm(name)
-            if not n:
+            n = _league_norm(split_squad(name, sport, league=True)[0])
+            if not n or _numbers(n) != _numbers(target):
                 continue
             if n == target:
                 score = 1.0
@@ -84,9 +100,14 @@ def match_competition(registry: Registry, sport: str, *names: str, country: str 
 
 def attach(repo: Repository, registry: Registry, provider: str, sport: str, ext_id: str, home: str, away: str,
            kickoff: datetime, league_names: tuple[str, ...], known: list[Fixture], create: bool,
-           country: str = "") -> Optional[tuple[Fixture, bool]]:
-    """Match an external event to a known fixture, or create it (fallback mode) when its league is enabled."""
-    hit = find_fixture(sport, home, away, kickoff, known, tolerance=timedelta(hours=3))
+           country: str = "", context: tuple[str, ...] = ()) -> Optional[tuple[Fixture, bool]]:
+    """Match an external event to a known fixture, or create it (fallback mode) when its league is enabled.
+
+    ``context`` is anything else the source says about where the event belongs (e.g. the whole league path);
+    like ``league_names`` it is read for squad markers, so a women's event stays off men's fixtures and
+    competitions, but it is not used to pick the competition."""
+    leagues = tuple(x for x in (*league_names, *context) if x)
+    hit = find_fixture(sport, home, away, kickoff, known, tolerance=timedelta(hours=3), leagues=leagues)
     if hit:
         fx, _score, swapped = hit
         if fx.refs.get(provider) != ext_id:
@@ -95,7 +116,8 @@ def attach(repo: Repository, registry: Registry, provider: str, sport: str, ext_
         return fx, swapped
     if not create:
         return None
-    comp = match_competition(registry, sport, *league_names, country=country)
+    comp = match_competition(registry, sport, *league_names, country=country,
+                             squad=fixture_squad(sport, home, away, leagues))
     if not comp:
         return None
     candidate = Fixture(id="", sport=sport, competition_id=comp["id"], competition_name=comp["name"],

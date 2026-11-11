@@ -248,8 +248,10 @@ class TheOddsApiProvider:
                     h, a = int(scores[ev["home_team"]]), int(scores[ev["away_team"]])
                 except (KeyError, TypeError, ValueError):
                     continue
-                # Provider home/away may be swapped relative to our fixture
-                if team_similarity(ev["home_team"], fx.home) < team_similarity(ev["home_team"], fx.away):
+                # Provider home/away may be swapped relative to our fixture (it is the same match: compare the
+                # club names only - our fixture may carry a "(W)" that this provider leaves out)
+                if (team_similarity(ev["home_team"], fx.home, fx.sport, ignore_squad=True)
+                        < team_similarity(ev["home_team"], fx.away, fx.sport, ignore_squad=True)):
                     h, a = a, h
                 self.repo.set_result(fx.id, h, a)
                 settled += 1

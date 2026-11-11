@@ -34,9 +34,11 @@ log = logging.getLogger("betfinder.repository")
 HISTORY_LIMIT = 80
 
 
-def fixture_id_for(sport: str, home: str, away: str, kickoff: datetime) -> str:
-    digest = hashlib.sha1(f"{sport}|{home}|{away}|{kickoff.isoformat()}".encode()).hexdigest()[:6]
-    return f"{sport[:2]}-{kickoff:%Y%m%d}-{slug(home)}-{slug(away)}-{digest}"
+def fixture_id_for(sport: str, home: str, away: str, kickoff: datetime, salt: str = "") -> str:
+    """``salt`` tells apart two matches with the same names and kick-off (see ``Repository.merge_fixture``)."""
+    key = f"{sport}|{home}|{away}|{kickoff.isoformat()}" + (f"|{salt}" if salt else "")
+    digest = hashlib.sha1(key.encode()).hexdigest()[:6]
+    return f"{sport[:2]}-{kickoff:%Y%m%d}-{slug(home, sport)}-{slug(away, sport)}-{digest}"
 
 
 def _odds_name(fid: str) -> str:
@@ -92,12 +94,19 @@ class Repository:
                         target = fx
                         break
             if target is None:
-                hit = find_fixture(candidate.sport, candidate.home, candidate.away, candidate.kickoff, existing.values())
+                hit = find_fixture(candidate.sport, candidate.home, candidate.away, candidate.kickoff, existing.values(),
+                                   leagues=(candidate.competition_name, candidate.competition_id))
                 if hit:
                     target, _score, swapped = hit
             if target is None:
                 target = candidate
-                target.id = target.id or fixture_id_for(candidate.sport, candidate.home, candidate.away, candidate.kickoff)
+                if not target.id:
+                    target.id = fixture_id_for(candidate.sport, candidate.home, candidate.away, candidate.kickoff)
+                    if target.id in existing:
+                        # same names and kick-off as a fixture it does not match (a source that lists the women's
+                        # team under the club's plain name): a different match must never overwrite that one
+                        target.id = fixture_id_for(candidate.sport, candidate.home, candidate.away, candidate.kickoff,
+                                                   salt=candidate.competition_id)
             else:
                 # Provider data refreshes kickoff/status of the canonical fixture.
                 if provider != "manual":

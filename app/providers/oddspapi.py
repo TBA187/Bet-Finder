@@ -174,7 +174,8 @@ class OddsPapiProvider:
                 if not ko:
                     continue
                 hit = attach(self.repo, self.registry, NAME, fx.sport, str(f.get("fixtureId")), str(f.get("participant1Name", "")),
-                             str(f.get("participant2Name", "")), ko, (), [fx], create=False)
+                             str(f.get("participant2Name", "")), ko, (), [fx], create=False,
+                             context=(str(f.get("tournamentName", "")),))
                 if hit:
                     ext_id, swapped = str(f.get("fixtureId")), hit[1]
                     break
